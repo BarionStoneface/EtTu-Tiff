@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -108,7 +109,8 @@ fun App(m: AppModel) {
                 Button(
                     onClick = { confirm = true },
                     enabled = n > 0 && !blocked,
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    // Above the phone's navigation bar / gesture area, not under it.
+                    modifier = Modifier.navigationBarsPadding().fillMaxWidth().padding(16.dp),
                 ) { Text(if (blocked) "Fix the issues marked in red" else "Convert $n scans") }
             }
         },
