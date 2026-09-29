@@ -1,0 +1,50 @@
+name: Build APK
+
+# Builds the Android app and publishes it to the "latest" release,
+# so the APK can be downloaded straight to a phone.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests and build
+        working-directory: android
+        run: ./gradlew --stacktrace :app:testDebugUnitTest :app:assembleRelease
+
+      - name: Collect APK
+        run: cp android/app/build/outputs/apk/release/app-release.apk "Transformer-${{ github.run_number }}.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: Transformer-*.apk
+
+      - name: Publish to the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest "Transformer-${{ github.run_number }}.apk" \
+            --target "${{ github.sha }}" \
+            --title "Transformer build ${{ github.run_number }}" \
+            --notes "Install on Android 8 or later. Built from ${{ github.sha }}."

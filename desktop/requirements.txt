@@ -1,0 +1,4 @@
+pillow>=11.0
+tifffile
+imagecodecs
+numpy
