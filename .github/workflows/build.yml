@@ -33,18 +33,18 @@ jobs:
         run: ./gradlew --stacktrace :app:testDebugUnitTest :app:assembleRelease
 
       - name: Collect APK
-        run: cp android/app/build/outputs/apk/release/app-release.apk "Transformer-${{ github.run_number }}.apk"
+        run: cp android/app/build/outputs/apk/release/app-release.apk "EtTuTiff-${{ github.run_number }}.apk"
       - uses: actions/upload-artifact@v4
         with:
           name: apk
-          path: Transformer-*.apk
+          path: EtTuTiff-*.apk
 
       - name: Publish to the latest release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest "Transformer-${{ github.run_number }}.apk" \
+          gh release create latest "EtTuTiff-${{ github.run_number }}.apk" \
             --target "${{ github.sha }}" \
-            --title "Transformer build ${{ github.run_number }}" \
+            --title "Et Tu, Tiff? build ${{ github.run_number }}" \
             --notes "Install on Android 8 or later. Built from ${{ github.sha }}."

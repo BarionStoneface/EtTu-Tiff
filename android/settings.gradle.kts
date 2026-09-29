@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "Transformer"
+rootProject.name = "EtTuTiff"
 include(":app")

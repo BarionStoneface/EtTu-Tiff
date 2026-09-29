@@ -1,4 +1,6 @@
-# TiffTransformer
+# Et Tu, Tiff?
+
+*Leaving TIFF behind, gently.*
 
 Turns film-scan TIFFs into full-quality JPEGs, one roll at a time. It keeps
 what matters from the scan, drops what doesn't, and writes your own film and

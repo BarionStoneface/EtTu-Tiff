@@ -78,7 +78,7 @@ fun App(m: AppModel) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (settings) "Settings" else "Transformer") },
+                title = { Text(if (settings) "Settings" else "Et Tu, Tiff?") },
                 actions = {
                     if (settings) TextButton(onClick = { m.saveSettings(); settings = false }) { Text("Done") }
                     else if (m.phase != Phase.Converting) TextButton(onClick = { settings = true }) { Text("Settings") }
