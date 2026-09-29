@@ -56,6 +56,7 @@ class ScanFile(
     val error: String?,
 ) {
     var newName by mutableStateOf(stem(name))
+    @Volatile var done = false
 }
 
 class Roll(
@@ -80,6 +81,8 @@ class Roll(
     var deleteSidecars by mutableStateOf(true)
     var dateOverride by mutableStateOf("")
     var include by mutableStateOf(true)
+    /** The folder's address after renaming (renaming changes it). */
+    var outputUri: Uri? = null
 
     val undated get() = files.count { !it.date.embedded }
     val scanners get() = files.mapNotNull { it.scanner }.distinct()
@@ -263,6 +266,7 @@ object Rolls {
         if (newName.isEmpty() || newName == roll.name) return null
         return try {
             val r = DocumentsContract.renameDocument(ctx.contentResolver, roll.folder.uri, newName)
+            roll.outputUri = r
             if (r == null) "couldn't rename the folder" else null
         } catch (e: Exception) {
             if (roll.isRoot) "the folder you picked can't be renamed from inside the app; rename it to \"$newName\" in My Files"

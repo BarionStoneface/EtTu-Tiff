@@ -24,6 +24,10 @@ import java.util.concurrent.atomic.AtomicInteger
 
 enum class Phase { Start, Scanning, Ready, Converting, Done }
 
+data class Output(val roll: Roll, val count: Int, val firstJpeg: String?, val renamed: Boolean = false) {
+    val folderName get() = if (renamed) roll.newFolderName else roll.name
+}
+
 class AppModel(app: Application) : AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
@@ -34,6 +38,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     var quality by mutableIntStateOf(prefs.getInt("quality", 100))
     /** Keep the TIFFs and add JPEGs beside them, instead of replacing them. */
     var keepTiffs by mutableStateOf(prefs.getBoolean("keepTiffs", false))
+    var theme by mutableStateOf(runCatching { AppTheme.valueOf(prefs.getString("theme", "")!!) }.getOrDefault(AppTheme.STUDIO))
 
     /** Past answers, offered in the dropdowns. Never filled in automatically. */
     val cameras = mutableStateListOf<String>().apply { addAll(history("cameras")) }
@@ -44,7 +49,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     fun saveSettings() {
         prefs.edit().putString("author", author.trim()).putString("license", license.name)
             .putString("contact", contact.trim()).putInt("quality", quality)
-            .putBoolean("keepTiffs", keepTiffs).apply()
+            .putBoolean("keepTiffs", keepTiffs).putString("theme", theme.name).apply()
     }
 
     private fun history(key: String): List<String> =
@@ -69,6 +74,8 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     var done by mutableIntStateOf(0)
     var total by mutableIntStateOf(0)
     var fileProgress by mutableFloatStateOf(0f)
+    /** Where each finished roll's JPEGs ended up, for the done screen. */
+    val outputs = mutableStateListOf<Output>()
 
     fun open(uri: Uri) {
         val ctx = getApplication<Application>()
@@ -90,7 +97,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         android.provider.DocumentsContract.getDocumentId(r.folder.uri).count { it == '/' }
     }.getOrDefault(0)
 
-    fun reset() { rolls.clear(); log.clear(); phase = Phase.Start; status = "" }
+    fun reset() { rolls.clear(); log.clear(); outputs.clear(); phase = Phase.Start; status = "" }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     fun convert() {
@@ -107,6 +114,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         total = todo.sumOf { it.files.size }
         done = 0
         log.clear()
+        outputs.clear()
         phase = Phase.Converting
         // A few files at once: memory stays small because rows are streamed.
         val workers = Dispatchers.Default.limitedParallelism(minOf(3, Runtime.getRuntime().availableProcessors()))
@@ -120,6 +128,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
                     async(workers) {
                         try {
                             Rolls.convertOne(ctx, roll, f, i, meta, credits, quality, keep) { p -> if (i % 3 == 0) fileProgress = p }
+                            f.done = true
                             withContext(Dispatchers.Main) { log += "✓ ${roll.name}/${f.name} → ${f.newName}.jpg" }
                         } catch (t: Throwable) {
                             failed.incrementAndGet()
@@ -129,6 +138,8 @@ class AppModel(app: Application) : AndroidViewModel(app) {
                         }
                     }
                 }.awaitAll()
+                val made = roll.files.count { it.done }
+                if (made > 0) outputs += Output(roll, made, roll.files.firstOrNull { it.done }?.newName?.plus(".jpg"))
                 // Keeping the TIFFs means nothing in the folder is deleted or renamed.
                 if (keep) continue
                 if (failed.get() > 0) {
@@ -145,6 +156,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
             for (roll in renames.sortedByDescending { depth(it) }) {
                 val err = withContext(Dispatchers.IO) { Rolls.renameFolder(ctx, roll) }
                 log += if (err == null) "${roll.name} → ${roll.newFolderName}" else "${roll.name}: $err"
+                if (err == null) for (i in outputs.indices) if (outputs[i].roll === roll) outputs[i] = outputs[i].copy(renamed = true)
             }
             status = ""
             phase = Phase.Done

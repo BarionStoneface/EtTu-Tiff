@@ -14,7 +14,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -51,7 +54,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.barion.filmscans.core.FILM_STOCKS
@@ -66,7 +73,7 @@ private val PUSH_OPTIONS = listOf(-2 to "Pull −2", -1 to "Pull −1", 0 to "Bo
 private val DAY = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 private val MINUTE = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun App(m: AppModel) {
     var settings by remember { mutableStateOf(false) }
@@ -80,7 +87,13 @@ fun App(m: AppModel) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (settings) "Settings" else "Et Tu, Tiff?") },
+                title = {
+                    if (settings) Text("Settings")
+                    else Text(buildAnnotatedString {
+                        append("Et Tu, Tiff")
+                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)) { append("?") }
+                    })
+                },
                 actions = {
                     if (settings) TextButton(onClick = { m.saveSettings(); settings = false }) { Text("Done") }
                     else if (m.phase != Phase.Converting) TextButton(onClick = { settings = true }) { Text("Settings") }
@@ -88,24 +101,27 @@ fun App(m: AppModel) {
             )
         },
         bottomBar = {
-            if (!settings && m.phase == Phase.Ready) {
+            // Hidden while typing, so the keyboard doesn't push it up over the fields.
+            if (!settings && m.phase == Phase.Ready && !WindowInsets.isImeVisible) {
                 val n = m.rolls.filter { it.include }.sumOf { it.files.size }
                 val blocked = m.rolls.any { it.include && it.problems().isNotEmpty() }
                 Button(
                     onClick = { confirm = true },
                     enabled = n > 0 && !blocked,
-                    modifier = Modifier.fillMaxWidth().padding(16.dp).imePadding(),
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
                 ) { Text(if (blocked) "Fix the issues marked in red" else "Convert $n scans") }
             }
         },
     ) { pad ->
-        Column(Modifier.padding(pad).fillMaxSize()) {
+        // The keyboard inset is applied once, here, after what the bars already cover.
+        Column(Modifier.padding(pad).consumeWindowInsets(pad).imePadding().fillMaxSize()) {
             when {
                 settings -> SettingsScreen(m)
                 m.phase == Phase.Start -> StartScreen(m) { picker.launch(null) }
                 m.phase == Phase.Scanning -> Busy("Reading scans…", m.status)
                 m.phase == Phase.Ready -> RollList(m)
-                else -> ProgressScreen(m) { m.reset() }
+                m.phase == Phase.Converting -> ProgressScreen(m)
+                else -> DoneScreen(m)
             }
         }
     }
@@ -119,8 +135,8 @@ private fun StartScreen(m: AppModel, pick: () -> Unit) {
         Text("Turns folders of TIFF scans into full-quality JPEGs, one roll per folder.",
             style = MaterialTheme.typography.bodyLarge)
         Text("Keeps the pixels, colour profile, DPI, scanner and original scan date. Drops location and " +
-            "everything else, then adds your camera, film, push/pull and copyright. Deletes each TIFF only " +
-            "after its JPEG checks out.", style = MaterialTheme.typography.bodyMedium)
+            "everything else, then adds your camera, film, push/pull and copyright. JPEGs are saved in the " +
+            "same folder as their TIFFs; you choose whether the TIFFs are replaced or kept.", style = MaterialTheme.typography.bodyMedium)
         if (m.author.isBlank()) Text("Add your name in Settings first, so the copyright gets written.",
             color = MaterialTheme.colorScheme.primary)
         Button(onClick = pick, modifier = Modifier.fillMaxWidth()) { Text("Choose scans folder") }
@@ -143,7 +159,7 @@ private fun Busy(title: String, detail: String) {
 @Composable
 private fun RollList(m: AppModel) {
     LazyColumn(
-        Modifier.fillMaxSize().imePadding(),
+        Modifier.fillMaxSize(),
         contentPadding = PaddingValues(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -283,19 +299,13 @@ private fun ConfirmDialog(m: AppModel, onDismiss: () -> Unit, onGo: () -> Unit) 
 }
 
 @Composable
-private fun ProgressScreen(m: AppModel, again: () -> Unit) {
+private fun ProgressScreen(m: AppModel) {
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        if (m.phase == Phase.Converting) {
-            Text("Converting ${m.status}… ${m.done} of ${m.total}")
-            LinearProgressIndicator(progress = { if (m.total == 0) 0f else m.done.toFloat() / m.total }, modifier = Modifier.fillMaxWidth())
-            LinearProgressIndicator(progress = { m.fileProgress }, modifier = Modifier.fillMaxWidth())
-            Text("Keep the app open until it's done.", style = MaterialTheme.typography.bodySmall)
-        } else {
-            val failed = m.log.count { it.startsWith("✗") }
-            Text(if (failed == 0) "Done. ${m.total} scans converted." else "Done, with $failed problem(s). Those TIFFs are untouched.",
-                style = MaterialTheme.typography.titleMedium)
-            Button(onClick = again, modifier = Modifier.fillMaxWidth()) { Text("Convert another folder") }
-        }
+        Text("Converting ${m.status}… ${m.done} of ${m.total}")
+        LinearProgressIndicator(progress = { if (m.total == 0) 0f else m.done.toFloat() / m.total }, modifier = Modifier.fillMaxWidth())
+        LinearProgressIndicator(progress = { m.fileProgress }, modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.secondary)
+        Text("Keep the app open until it's done.", style = MaterialTheme.typography.bodySmall)
         LazyColumn(Modifier.fillMaxSize()) {
             itemsIndexed(m.log.reversed()) { _, line -> Text(line, style = MaterialTheme.typography.bodySmall) }
         }
@@ -303,8 +313,43 @@ private fun ProgressScreen(m: AppModel, again: () -> Unit) {
 }
 
 @Composable
+private fun DoneScreen(m: AppModel) {
+    val ctx = LocalContext.current
+    var details by remember { mutableStateOf(false) }
+    val failed = m.log.count { it.startsWith("✗") }
+    val made = m.outputs.sumOf { it.count }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item {
+            Text(if (failed == 0) "Done — $made JPEGs saved." else "Done — $made saved, $failed didn't convert.",
+                style = MaterialTheme.typography.headlineSmall)
+            if (failed > 0) Text("The TIFFs that didn't convert are untouched.", style = MaterialTheme.typography.bodySmall)
+        }
+        items(m.outputs, key = { it.roll.folder.uri.toString() }) { o ->
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(o.folderName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("${o.count} JPEG(s) in ${Places.label(o.roll.outputUri ?: o.roll.folder.uri)}",
+                        style = MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { Places.viewPhotos(ctx, o) }, enabled = o.firstJpeg != null) { Text("View photos") }
+                        OutlinedButton(onClick = { Places.openFolder(ctx, o) }) { Text("Open folder") }
+                    }
+                }
+            }
+        }
+        item {
+            Button(onClick = { m.reset() }, modifier = Modifier.fillMaxWidth()) { Text("Back to home") }
+        }
+        item {
+            TextButton(onClick = { details = !details }) { Text(if (details) "Hide details" else "Show details (${m.log.size})") }
+        }
+        if (details) items(m.log.toList()) { line -> Text(line, style = MaterialTheme.typography.bodySmall) }
+    }
+}
+
+@Composable
 private fun SettingsScreen(m: AppModel) {
-    LazyColumn(Modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(16.dp),
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Text("Written into every photo: EXIF Artist and Copyright, XMP creator, rights and usage terms, " +
@@ -327,6 +372,10 @@ private fun SettingsScreen(m: AppModel) {
             val c = m.credits()
             if (c.author.isNotBlank()) Text("${Metadata.copyrightNotice(c, LocalDate.now().year)}\n${Metadata.usageTerms(c)}",
                 style = MaterialTheme.typography.bodySmall)
+        }
+        item {
+            PickField("Colours", m.theme.label, AppTheme.entries.map { it.label },
+                { l -> m.theme = AppTheme.entries.first { it.label == l } }, Modifier.fillMaxWidth())
         }
         item {
             Text("JPEG quality: ${m.quality}${if (m.quality == 100) " (best)" else ""}")
