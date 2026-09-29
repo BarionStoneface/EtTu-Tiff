@@ -37,8 +37,11 @@ nothing leaves the phone.
 - **Renames in bulk.** You can use a pattern (`{name}`, `{nn}`, `{date}`,
   `{roll}`, `{film}`) or edit names one by one. The original filename is
   always kept inside the JPEG.
-- **Cleans up safely.** Each TIFF is deleted only after its JPEG has been
-  written and read back. It also removes `.thm`, `.xmp` and other info
+- **Replace or keep, your choice.** Before converting, you choose between
+  replacing the TIFFs and keeping them with the JPEGs added beside them.
+  Keeping them means nothing is deleted or renamed.
+- **Cleans up safely.** When replacing, each TIFF is deleted only after its
+  JPEG has been written and read back. It also removes `.thm`, `.xmp` and other info
   files, and renames `Roll 12 TIFF` to `Roll 12 JPEG`.
 
 Film details are written to the standard EXIF fields and to the

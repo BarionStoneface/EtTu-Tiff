@@ -3,6 +3,7 @@ package com.barion.filmscans
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -36,6 +37,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -252,14 +254,22 @@ private fun RollCard(m: AppModel, r: Roll) {
 private fun ConfirmDialog(m: AppModel, onDismiss: () -> Unit, onGo: () -> Unit) {
     val rolls = m.rolls.filter { it.include }
     val n = rolls.sumOf { it.files.size }
-    val side = rolls.filter { it.deleteSidecars }.sumOf { it.sidecars.size }
+    val side = if (m.keepTiffs) 0 else rolls.filter { it.deleteSidecars }.sumOf { it.sidecars.size }
     val noFilm = rolls.count { it.film.isBlank() }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Convert $n scans?") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Each TIFF is deleted after its JPEG is written and checked.")
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { m.keepTiffs = false }) {
+                    RadioButton(selected = !m.keepTiffs, onClick = { m.keepTiffs = false })
+                    Text("Replace the TIFFs (each is deleted once its JPEG checks out)")
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { m.keepTiffs = true }) {
+                    RadioButton(selected = m.keepTiffs, onClick = { m.keepTiffs = true })
+                    Text("Keep the TIFFs and add JPEGs beside them")
+                }
+                if (m.keepTiffs) Text("Nothing is deleted or renamed.", style = MaterialTheme.typography.bodySmall)
                 if (side > 0) Text("$side info file(s) will be deleted.")
                 if (noFilm > 0) Text("$noFilm roll(s) have no film stock set.", color = MaterialTheme.colorScheme.primary)
                 if (m.author.isBlank()) Text("No name set in Settings, so no copyright will be written.",
@@ -282,7 +292,7 @@ private fun ProgressScreen(m: AppModel, again: () -> Unit) {
             Text("Keep the app open until it's done.", style = MaterialTheme.typography.bodySmall)
         } else {
             val failed = m.log.count { it.startsWith("✗") }
-            Text(if (failed == 0) "Done. ${m.total} scans converted." else "Done, with $failed problem(s). Their TIFFs were kept.",
+            Text(if (failed == 0) "Done. ${m.total} scans converted." else "Done, with $failed problem(s). Those TIFFs are untouched.",
                 style = MaterialTheme.typography.titleMedium)
             Button(onClick = again, modifier = Modifier.fillMaxWidth()) { Text("Convert another folder") }
         }

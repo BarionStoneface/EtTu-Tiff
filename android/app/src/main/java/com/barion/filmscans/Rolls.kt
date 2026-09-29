@@ -222,7 +222,7 @@ object Rolls {
 
     /** Convert one file. The TIFF is deleted only after the JPEG is written and read back. */
     fun convertOne(ctx: Context, roll: Roll, f: ScanFile, index: Int, meta: RollMeta, credits: Credits, quality: Int,
-                   progress: (Float) -> Unit) {
+                   keepTiff: Boolean, progress: (Float) -> Unit) {
         val target = f.newName + ".jpg"
         val existing = roll.folder.findFile(target)
         val outDoc = existing ?: roll.folder.createFile("image/jpeg", f.newName) ?: error("couldn't create $target")
@@ -230,7 +230,7 @@ object Rolls {
         try {
             UriSource.open(ctx, f.doc.uri).use { src ->
                 val t = TiffReader(src)
-                val frame = Scan.frame(t, f.name, date, index + 1, roll.newFolderName)
+                val frame = Scan.frame(t, f.name, date, index + 1, if (keepTiff) roll.name else roll.newFolderName)
                 val os = ctx.contentResolver.openOutputStream(outDoc.uri, if (existing != null) "wt" else "w")
                     ?: error("couldn't write $target")
                 BufferedOutputStream(os, 1 shl 16).use { Scan.convert(t, frame, meta, credits, it, quality, progress) }
@@ -240,7 +240,7 @@ object Rolls {
             if (existing == null) runCatching { outDoc.delete() }
             throw e
         }
-        if (!f.doc.delete()) throw IllegalStateException("JPEG saved, but the TIFF couldn't be deleted")
+        if (!keepTiff && !f.doc.delete()) throw IllegalStateException("JPEG saved, but the TIFF couldn't be deleted")
     }
 
     private fun verify(ctx: Context, uri: Uri, f: ScanFile) {

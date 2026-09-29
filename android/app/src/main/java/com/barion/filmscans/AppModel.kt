@@ -32,6 +32,8 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     var license by mutableStateOf(runCatching { License.valueOf(prefs.getString("license", "")!!) }.getOrDefault(License.ALL_RIGHTS))
     var contact by mutableStateOf(prefs.getString("contact", "") ?: "")
     var quality by mutableIntStateOf(prefs.getInt("quality", 100))
+    /** Keep the TIFFs and add JPEGs beside them, instead of replacing them. */
+    var keepTiffs by mutableStateOf(prefs.getBoolean("keepTiffs", false))
 
     /** Past answers, offered in the dropdowns. Never filled in automatically. */
     val cameras = mutableStateListOf<String>().apply { addAll(history("cameras")) }
@@ -41,7 +43,8 @@ class AppModel(app: Application) : AndroidViewModel(app) {
 
     fun saveSettings() {
         prefs.edit().putString("author", author.trim()).putString("license", license.name)
-            .putString("contact", contact.trim()).putInt("quality", quality).apply()
+            .putString("contact", contact.trim()).putInt("quality", quality)
+            .putBoolean("keepTiffs", keepTiffs).apply()
     }
 
     private fun history(key: String): List<String> =
@@ -100,6 +103,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         }
         saveSettings()
         val credits = credits()
+        val keep = keepTiffs
         total = todo.sumOf { it.files.size }
         done = 0
         log.clear()
@@ -115,16 +119,18 @@ class AppModel(app: Application) : AndroidViewModel(app) {
                 roll.files.mapIndexed { i, f ->
                     async(workers) {
                         try {
-                            Rolls.convertOne(ctx, roll, f, i, meta, credits, quality) { p -> if (i % 3 == 0) fileProgress = p }
+                            Rolls.convertOne(ctx, roll, f, i, meta, credits, quality, keep) { p -> if (i % 3 == 0) fileProgress = p }
                             withContext(Dispatchers.Main) { log += "✓ ${roll.name}/${f.name} → ${f.newName}.jpg" }
                         } catch (t: Throwable) {
                             failed.incrementAndGet()
-                            withContext(Dispatchers.Main) { log += "✗ ${roll.name}/${f.name}: ${t.message ?: t.javaClass.simpleName} (TIFF kept)" }
+                            withContext(Dispatchers.Main) { log += "✗ ${roll.name}/${f.name}: ${t.message ?: t.javaClass.simpleName}" + if (keep) "" else " (TIFF kept)" }
                         } finally {
                             withContext(Dispatchers.Main) { done++ }
                         }
                     }
                 }.awaitAll()
+                // Keeping the TIFFs means nothing in the folder is deleted or renamed.
+                if (keep) continue
                 if (failed.get() > 0) {
                     log += "${roll.name}: ${failed.get()} failed, so its info files and folder name were left alone."
                     continue
