@@ -16,6 +16,7 @@ import com.barion.filmscans.core.Credits
 import com.barion.filmscans.core.License
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
@@ -24,7 +25,8 @@ import java.util.concurrent.atomic.AtomicInteger
 
 enum class Phase { Start, Scanning, Ready, Converting, Done }
 
-data class Output(val roll: Roll, val count: Int, val firstJpeg: String?, val renamed: Boolean = false) {
+data class Output(val roll: Roll, val count: Int, val firstJpeg: String?, val renamed: Boolean = false,
+                  val media: android.net.Uri? = null) {
     val folderName get() = if (renamed) roll.newFolderName else roll.name
 }
 
@@ -37,7 +39,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     var contact by mutableStateOf(prefs.getString("contact", "") ?: "")
     var quality by mutableIntStateOf(prefs.getInt("quality", 100))
     /** Keep the TIFFs and add JPEGs beside them, instead of replacing them. */
-    var keepTiffs by mutableStateOf(prefs.getBoolean("keepTiffs", false))
+    var keepTiffs by mutableStateOf(prefs.getBoolean("keepTiffs", true))
     var theme by mutableStateOf(runCatching { AppTheme.valueOf(prefs.getString("theme", "")!!) }.getOrDefault(AppTheme.STUDIO))
 
     /** Past answers, offered in the dropdowns. Never filled in automatically. */
@@ -88,6 +90,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
                 runCatching { Rolls.find(ctx, root) { status = it } }
             }
             found.onSuccess { rolls.addAll(it) }.onFailure { status = "Couldn't read the folder: ${it.message}" }
+            loadThumbnails()
             phase = if (rolls.isEmpty()) Phase.Start else Phase.Ready
             if (rolls.isEmpty() && found.isSuccess) status = "No TIFF files in that folder."
         }
@@ -97,7 +100,21 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         android.provider.DocumentsContract.getDocumentId(r.folder.uri).count { it == '/' }
     }.getOrDefault(0)
 
-    fun reset() { rolls.clear(); log.clear(); outputs.clear(); phase = Phase.Start; status = "" }
+    private var thumbJob: Job? = null
+
+    /** Previews load in the background, first roll first, a couple at a time. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun loadThumbnails() {
+        val ctx = getApplication<Application>()
+        val io = Dispatchers.IO.limitedParallelism(2)
+        thumbJob?.cancel()
+        thumbJob = viewModelScope.launch {
+            for (roll in rolls.toList()) roll.files.filter { it.error == null && it.thumb == null }
+                .map { f -> async(io) { f.thumb = Rolls.thumbnail(ctx, f) } }.awaitAll()
+        }
+    }
+
+    fun reset() { thumbJob?.cancel(); rolls.clear(); log.clear(); outputs.clear(); phase = Phase.Start; status = "" }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     fun convert() {
@@ -109,6 +126,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
                 remember("films", customFilms, r.film)
         }
         saveSettings()
+        thumbJob?.cancel()
         val credits = credits()
         val keep = keepTiffs
         total = todo.sumOf { it.files.size }
@@ -157,6 +175,14 @@ class AppModel(app: Application) : AndroidViewModel(app) {
                 val err = withContext(Dispatchers.IO) { Rolls.renameFolder(ctx, roll) }
                 log += if (err == null) "${roll.name} → ${roll.newFolderName}" else "${roll.name}: $err"
                 if (err == null) for (i in outputs.indices) if (outputs[i].roll === roll) outputs[i] = outputs[i].copy(renamed = true)
+            }
+            // Tell the phone's media index about the new JPEGs, so the gallery shows them
+            // right away and "View photos" can open them there.
+            for (i in outputs.indices) {
+                val o = outputs[i]
+                val names = o.roll.files.filter { it.done }.map { it.newName + ".jpg" }
+                val media = withContext(Dispatchers.IO) { Places.scan(ctx, o.roll.outputUri ?: o.roll.folder.uri, names) }
+                outputs[i] = o.copy(media = media)
             }
             status = ""
             phase = Phase.Done

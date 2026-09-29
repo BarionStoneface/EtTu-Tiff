@@ -116,9 +116,10 @@ class TiffReader(private val src: ByteSource) {
 
     /**
      * Streams the image top to bottom. [sink] gets (firstRow, rowCount, pixels) where
-     * pixels holds rowCount rows of width*outChannels bytes each.
+     * pixels holds rowCount rows of width*outChannels bytes each. With [wantRow], rows it
+     * rejects may be skipped (left undefined), and bands with no wanted rows aren't sent.
      */
-    fun readRows(sink: (Int, Int, ByteArray) -> Unit) {
+    fun readRows(wantRow: ((Int) -> Boolean)? = null, sink: (Int, Int, ByteArray) -> Unit) {
         checkSupported()
         val tiled = tags.containsKey(322)
         val chunkW = if (tiled) tags[322]!!.int() else width
@@ -175,10 +176,13 @@ class TiffReader(private val src: ByteSource) {
 
         for (dy in 0 until bands) {
             val rows = minOf(bandH, height - dy * bandH)
+            // Thumbnails only need some rows: skip whole bands that hold none of them.
+            if (wantRow != null && (dy * bandH until dy * bandH + rows).none(wantRow)) continue
             if (direct) {
                 val rps = chunkH
                 for (plane in 0 until planes) for (r in 0 until rows) {
                     val y = dy * bandH + r
+                    if (wantRow != null && !wantRow(y)) continue
                     val idx = plane * down + y / rps
                     if (idx >= offsets.size) throw TiffException("image data is truncated")
                     val off = offsets[idx] + (y % rps).toLong() * chunkRowBytes

@@ -4,7 +4,13 @@ import android.content.Context
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.DocumentsContract
+import android.graphics.Bitmap
+import android.graphics.Matrix
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import com.barion.filmscans.core.Thumbs
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -45,6 +51,7 @@ fun jpegFolderName(name: String): String {
     return if (r != name) r else "$name JPEG"
 }
 
+@Stable
 class ScanFile(
     val doc: DocumentFile,
     val name: String,
@@ -57,8 +64,10 @@ class ScanFile(
 ) {
     var newName by mutableStateOf(stem(name))
     @Volatile var done = false
+    var thumb by mutableStateOf<ImageBitmap?>(null)
 }
 
+@Stable
 class Roll(
     val folder: DocumentFile,
     val isRoot: Boolean,
@@ -257,6 +266,23 @@ object Rolls {
             ?: error("the JPEG didn't decode")
         bmp.recycle()
     }
+
+    /** A small preview decoded straight from the TIFF, turned the way it should display. */
+    fun thumbnail(ctx: Context, f: ScanFile): ImageBitmap? = runCatching {
+        UriSource.open(ctx, f.doc.uri).use { src ->
+            val t = TiffReader(src)
+            val th = Thumbs.sample(t, 320)
+            var bmp = Bitmap.createBitmap(th.argb, th.width, th.height, Bitmap.Config.ARGB_8888)
+            val m = Matrix()
+            when (t.orientation) {
+                2 -> m.setScale(-1f, 1f); 3 -> m.setRotate(180f); 4 -> m.setScale(1f, -1f)
+                5 -> { m.setRotate(90f); m.postScale(-1f, 1f) }; 6 -> m.setRotate(90f)
+                7 -> { m.setRotate(270f); m.postScale(-1f, 1f) }; 8 -> m.setRotate(270f)
+            }
+            if (!m.isIdentity) bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+            bmp.asImageBitmap()
+        }
+    }.getOrNull()
 
     fun deleteSidecars(roll: Roll): Int = roll.sidecars.count { runCatching { it.delete() }.getOrDefault(false) }
 

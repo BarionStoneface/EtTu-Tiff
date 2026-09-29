@@ -34,6 +34,8 @@ nothing leaves the phone.
 - **Drops location** and every other tag in the original.
 - **Writes your copyright** into EXIF, XMP and IPTC fields and a JPEG
   comment. You choose "all rights reserved" or a Creative Commons licence.
+- **Previews the roll first.** Thumbnails are read straight from the TIFFs
+  before anything is converted.
 - **Renames in bulk.** You can use a pattern (`{name}`, `{nn}`, `{date}`,
   `{roll}`, `{film}`) or edit names one by one. The original filename is
   always kept inside the JPEG.

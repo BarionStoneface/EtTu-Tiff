@@ -4,6 +4,24 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.SuggestionChip
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -104,14 +122,23 @@ fun App(m: AppModel) {
         bottomBar = {
             // Hidden while typing, so the keyboard doesn't push it up over the fields.
             if (!settings && m.phase == Phase.Ready && !WindowInsets.isImeVisible) {
-                val n = m.rolls.filter { it.include }.sumOf { it.files.size }
-                val blocked = m.rolls.any { it.include && it.problems().isNotEmpty() }
+                val n by remember { derivedStateOf { m.rolls.filter { it.include }.sumOf { it.files.size } } }
+                val blocked by remember { derivedStateOf { m.rolls.any { it.include && it.problems().isNotEmpty() } } }
+                val replace = !m.keepTiffs
                 Button(
                     onClick = { confirm = true },
                     enabled = n > 0 && !blocked,
+                    colors = if (replace) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError) else ButtonDefaults.buttonColors(),
                     // Above the phone's navigation bar / gesture area, not under it.
                     modifier = Modifier.navigationBarsPadding().fillMaxWidth().padding(16.dp),
-                ) { Text(if (blocked) "Fix the issues marked in red" else "Convert $n scans") }
+                ) {
+                    Text(when {
+                        blocked -> "Fix the issues marked in red"
+                        replace -> "Convert $n and delete the TIFFs"
+                        else -> "Convert $n, keep the TIFFs"
+                    })
+                }
             }
         },
     ) { pad ->
@@ -160,142 +187,280 @@ private fun Busy(title: String, detail: String) {
 
 @Composable
 private fun RollList(m: AppModel) {
+    var preview by remember { mutableStateOf<ScanFile?>(null) }
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        item { ModeCard(m) }
         item {
             Text("${m.rolls.size} roll(s) in ${m.rootName}. Each roll starts blank — nothing carries over.",
                 style = MaterialTheme.typography.bodySmall)
         }
-        items(m.rolls, key = { it.folder.uri.toString() }) { RollCard(m, it) }
+        items(m.rolls, key = { it.folder.uri.toString() }) { RollCard(m, it) { f -> preview = f } }
     }
+    preview?.let { PreviewDialog(it) { preview = null } }
+}
+
+/** The one choice that deletes files, stated plainly before anything happens. */
+@Composable
+private fun ModeCard(m: AppModel) {
+    val replace = !m.keepTiffs
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = if (replace) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer) else CardDefaults.cardColors(),
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("What happens to the TIFFs?", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Row(Modifier.fillMaxWidth().clickable { m.keepTiffs = true }, verticalAlignment = Alignment.Top) {
+                RadioButton(selected = m.keepTiffs, onClick = { m.keepTiffs = true })
+                Column(Modifier.padding(top = 12.dp)) {
+                    Text("Keep them", fontWeight = FontWeight.SemiBold)
+                    Text("The JPEGs are added next to the TIFFs. Nothing is deleted or renamed.",
+                        style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Row(Modifier.fillMaxWidth().clickable { m.keepTiffs = false }, verticalAlignment = Alignment.Top) {
+                RadioButton(selected = replace, onClick = { m.keepTiffs = false })
+                Column(Modifier.padding(top = 12.dp)) {
+                    Text("Replace them: DELETE the TIFFs", fontWeight = FontWeight.SemiBold,
+                        color = if (replace) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.error)
+                    Text("Each TIFF is permanently deleted once its JPEG is saved and checked. Deleted TIFFs do " +
+                        "not go to the Recycle bin, so keep a backup if you might want them.",
+                        style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RollCard(m: AppModel, r: Roll, onPreview: (ScanFile) -> Unit) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            RollHeader(r)
+            if (!r.include) return@Column
+            ThumbStrip(r, onPreview)
+            RollFacts(r)
+            MetaFields(r, m.cameras, m.lenses, m.labs, m.customFilms)
+            TagChips(r)
+            DateOverride(r)
+            HorizontalDivider()
+            NamesSection(r, onPreview)
+            HorizontalDivider()
+            FolderSection(r, m.keepTiffs)
+            RollProblems(r)
+        }
+    }
+}
+
+// Each section below reads only its own fields, so typing in one doesn't redraw the rest.
+
+@Composable
+private fun RollHeader(r: Roll) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(checked = r.include, onCheckedChange = { r.include = it })
+        Column {
+            Text(r.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            val span = remember(r) {
+                val dates = r.files.map { it.date.date.toLocalDate() }.distinct().sorted()
+                when (dates.size) {
+                    0 -> ""; 1 -> DAY.format(dates[0]); else -> "${DAY.format(dates.first())} to ${DAY.format(dates.last())}"
+                }
+            }
+            Text("${r.files.size} scans · scanned $span", style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
+private fun ThumbStrip(r: Roll, onPreview: (ScanFile) -> Unit) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        items(r.files, key = { it.name }) { f -> Thumb(f, 76.dp) { onPreview(f) } }
+    }
+}
+
+@Composable
+private fun Thumb(f: ScanFile, size: Dp, onClick: () -> Unit) {
+    Box(
+        Modifier.size(size).clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        val b = f.thumb
+        when {
+            b != null -> Image(b, contentDescription = f.name, contentScale = ContentScale.Crop, modifier = Modifier.matchParentSize())
+            f.error != null -> Text("!", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+            else -> CircularProgressIndicator(Modifier.size(size / 4), strokeWidth = 2.dp)
+        }
+    }
+}
+
+@Composable
+private fun PreviewDialog(f: ScanFile, onClose: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onClose,
+        confirmButton = { TextButton(onClick = onClose) { Text("Close") } },
+        title = { Text(f.name, style = MaterialTheme.typography.titleMedium) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val b = f.thumb
+                if (b != null) Image(b, contentDescription = f.name, contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxWidth().aspectRatio(b.width.toFloat() / b.height))
+                else Text(f.error ?: "Preview still loading…")
+                Text("→ ${f.newName}.jpg · ${f.width}×${f.height} · ${f.bits}-bit · scanned ${MINUTE.format(f.date.date)}",
+                    style = MaterialTheme.typography.bodySmall)
+            }
+        },
+    )
+}
+
+@Composable
+private fun RollFacts(r: Roll) {
+    val scanners = remember(r) { r.scanners }
+    if (scanners.isNotEmpty()) Text("Scanner (kept): ${scanners.joinToString()}", style = MaterialTheme.typography.bodySmall)
+    val bits = remember(r) { r.files.map { it.bits }.distinct().filter { it > 8 } }
+    if (bits.isNotEmpty()) Text("${bits.joinToString("/")}-bit scans: JPEG holds 8 bits per channel, so they're rounded to 8.",
+        style = MaterialTheme.typography.bodySmall)
+}
+
+@Composable
+private fun MetaFields(r: Roll, cameras: List<String>, lenses: List<String>, labs: List<String>, customFilms: List<String>) {
+    SuggestField("Camera body", r.camera, { r.camera = it }, cameras)
+    SuggestField("Lens (optional)", r.lens, { r.lens = it }, lenses)
+    val films = remember(customFilms.size) { customFilms + FILM_STOCKS.map { it.name } }
+    SuggestField("Film stock", r.film, { r.film = it; isoFor(it)?.let { iso -> r.iso = iso.toString() } }, films)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(r.iso, { v -> r.iso = v.filter { it.isDigit() }.take(5) }, label = { Text("Box ISO") },
+            singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.width(110.dp))
+        PickField("Push / pull", PUSH_OPTIONS.first { it.first == r.push }.second, PUSH_OPTIONS.map { it.second },
+            { label -> r.push = PUSH_OPTIONS.first { it.second == label }.first }, Modifier.weight(1f))
+    }
+    val iso = r.iso.toIntOrNull()
+    if (iso != null && r.push != 0) {
+        val ei = if (r.push > 0) iso shl r.push else iso shr -r.push
+        Text("Shot at EI $ei", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+    }
+    OutlinedTextField(r.notes, { r.notes = it }, label = { Text("Notes (optional)") }, modifier = Modifier.fillMaxWidth())
+    SuggestField("Lab / scanned by (optional)", r.lab, { r.lab = it }, labs)
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun RollCard(m: AppModel, r: Roll) {
-    var showNames by remember { mutableStateOf(false) }
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = r.include, onCheckedChange = { r.include = it })
-                Column {
-                    Text(r.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    val dates = r.files.map { it.date.date.toLocalDate() }.distinct().sorted()
-                    val span = when (dates.size) {
-                        0 -> ""; 1 -> DAY.format(dates[0]); else -> "${DAY.format(dates.first())} to ${DAY.format(dates.last())}"
-                    }
-                    Text("${r.files.size} scans · scanned $span", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-            if (!r.include) return@Column
-            if (r.scanners.isNotEmpty()) Text("Scanner (kept): ${r.scanners.joinToString()}",
-                style = MaterialTheme.typography.bodySmall)
-            val bits = r.files.map { it.bits }.distinct().filter { it > 8 }
-            if (bits.isNotEmpty()) Text("${bits.joinToString("/")}-bit scans: JPEG holds 8 bits per channel, so they're rounded to 8.",
-                style = MaterialTheme.typography.bodySmall)
-
-            ComboField("Camera body", r.camera, { r.camera = it }, m.cameras)
-            ComboField("Lens (optional)", r.lens, { r.lens = it }, m.lenses)
-            ComboField("Film stock", r.film, { r.film = it; isoFor(it)?.let { iso -> r.iso = iso.toString() } },
-                m.customFilms + FILM_STOCKS.map { it.name })
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(r.iso, { v -> r.iso = v.filter { it.isDigit() }.take(5) }, label = { Text("Box ISO") },
-                    singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.width(110.dp))
-                PickField("Push / pull", PUSH_OPTIONS.first { it.first == r.push }.second, PUSH_OPTIONS.map { it.second },
-                    { label -> r.push = PUSH_OPTIONS.first { it.second == label }.first }, Modifier.weight(1f))
-            }
-            r.meta().exposureIndex?.takeIf { r.push != 0 }?.let {
-                Text("Shot at EI $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-            }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                PROCESS_TAGS.forEach { tag ->
-                    FilterChip(selected = tag in r.tags, onClick = { r.tags = if (tag in r.tags) r.tags - tag else r.tags + tag },
-                        label = { Text(tag) })
-                }
-            }
-            OutlinedTextField(r.notes, { r.notes = it }, label = { Text("Notes (optional)") }, modifier = Modifier.fillMaxWidth())
-            ComboField("Lab / scanned by (optional)", r.lab, { r.lab = it }, m.labs)
-
-            if (r.undated > 0) {
-                Text("${r.undated} scan(s) have no date stored inside them; the file date is shown instead and may be " +
-                    "the download date. Enter the real scan date to use it for those.",
-                    color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                OutlinedTextField(r.dateOverride, { r.dateOverride = it }, singleLine = true,
-                    label = { Text("Scan date, e.g. 2019-04-12 or 2019-04-12 14:30") }, modifier = Modifier.fillMaxWidth())
-            }
-
-            HorizontalDivider()
-            Text("File names", fontWeight = FontWeight.SemiBold)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(r.pattern, { r.pattern = it; r.applyPattern() }, singleLine = true, label = { Text("Pattern") },
-                    modifier = Modifier.weight(1f))
-                OutlinedButton(onClick = { r.applyPattern() }) { Text("Re-apply") }
-            }
-            Text("{name} original · {nn} 01, {nnn} 001 · {date} · {roll} · {film}. The original name is always " +
-                "stored inside the JPEG.", style = MaterialTheme.typography.bodySmall)
-            TextButton(onClick = { showNames = !showNames }) {
-                Text(if (showNames) "Hide names" else "Edit names one by one (${r.files.first().newName}.jpg, …)")
-            }
-            if (showNames) r.files.forEach { f ->
-                OutlinedTextField(f.newName, { f.newName = it }, singleLine = true, label = { Text(f.name) },
-                    suffix = { Text(".jpg") }, modifier = Modifier.fillMaxWidth())
-            }
-
-            HorizontalDivider()
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Rename folder", Modifier.weight(1f))
-                Switch(r.renameFolder, { r.renameFolder = it })
-            }
-            if (r.renameFolder) OutlinedTextField(r.newFolderName, { r.newFolderName = it }, singleLine = true,
-                label = { Text("New folder name") }, modifier = Modifier.fillMaxWidth())
-            if (r.sidecars.isNotEmpty()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Delete ${r.sidecars.size} info file(s)", Modifier.weight(1f))
-                    Switch(r.deleteSidecars, { r.deleteSidecars = it })
-                }
-                Text(r.sidecars.joinToString { (it.name ?: "?") + if (it.isDirectory) "/" else "" },
-                    style = MaterialTheme.typography.bodySmall)
-            }
-            val replacing = r.replacing()
-            if (replacing.isNotEmpty()) Text("Will replace existing: ${replacing.joinToString()}",
-                color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
-            r.problems().forEach { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+private fun TagChips(r: Roll) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        PROCESS_TAGS.forEach { tag ->
+            FilterChip(selected = tag in r.tags, onClick = { r.tags = if (tag in r.tags) r.tags - tag else r.tags + tag },
+                label = { Text(tag) })
         }
     }
+}
+
+@Composable
+private fun DateOverride(r: Roll) {
+    if (r.undated == 0) return
+    Text("${r.undated} scan(s) have no date stored inside them; the file date is shown instead and may be " +
+        "the download date. Enter the real scan date to use it for those.",
+        color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+    OutlinedTextField(r.dateOverride, { r.dateOverride = it }, singleLine = true,
+        label = { Text("Scan date, e.g. 2019-04-12 or 2019-04-12 14:30") }, modifier = Modifier.fillMaxWidth())
+}
+
+@Composable
+private fun NamesSection(r: Roll, onPreview: (ScanFile) -> Unit) {
+    var showNames by remember { mutableStateOf(false) }
+    Text("File names", fontWeight = FontWeight.SemiBold)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(r.pattern, { r.pattern = it; r.applyPattern() }, singleLine = true, label = { Text("Pattern") },
+            modifier = Modifier.weight(1f))
+        OutlinedButton(onClick = { r.applyPattern() }) { Text("Re-apply") }
+    }
+    Text("{name} original · {nn} 01, {nnn} 001 · {date} · {roll} · {film}. The original name is always " +
+        "stored inside the JPEG.", style = MaterialTheme.typography.bodySmall)
+    TextButton(onClick = { showNames = !showNames }) {
+        Text(if (showNames) "Hide names" else "Edit names one by one (${r.files.first().newName}.jpg, …)")
+    }
+    if (showNames) r.files.forEach { f -> NameRow(f, onPreview) }
+}
+
+@Composable
+private fun NameRow(f: ScanFile, onPreview: (ScanFile) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Thumb(f, 52.dp) { onPreview(f) }
+        OutlinedTextField(f.newName, { f.newName = it }, singleLine = true, label = { Text(f.name) },
+            suffix = { Text(".jpg") }, modifier = Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun FolderSection(r: Roll, keep: Boolean) {
+    if (keep) {
+        Text("Folder name and info files stay as they are (keeping the TIFFs).", style = MaterialTheme.typography.bodySmall)
+        return
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Rename folder", Modifier.weight(1f))
+        Switch(r.renameFolder, { r.renameFolder = it })
+    }
+    if (r.renameFolder) OutlinedTextField(r.newFolderName, { r.newFolderName = it }, singleLine = true,
+        label = { Text("New folder name") }, modifier = Modifier.fillMaxWidth())
+    if (r.sidecars.isNotEmpty()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Delete ${r.sidecars.size} info file(s)", Modifier.weight(1f))
+            Switch(r.deleteSidecars, { r.deleteSidecars = it })
+        }
+        Text(r.sidecars.joinToString { (it.name ?: "?") + if (it.isDirectory) "/" else "" },
+            style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun RollProblems(r: Roll) {
+    val replacing = r.replacing()
+    if (replacing.isNotEmpty()) Text("Will overwrite existing JPEGs: ${replacing.joinToString()}",
+        color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+    r.problems().forEach { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
 }
 
 @Composable
 private fun ConfirmDialog(m: AppModel, onDismiss: () -> Unit, onGo: () -> Unit) {
     val rolls = m.rolls.filter { it.include }
     val n = rolls.sumOf { it.files.size }
-    val side = if (m.keepTiffs) 0 else rolls.filter { it.deleteSidecars }.sumOf { it.sidecars.size }
+    val replace = !m.keepTiffs
+    val side = if (replace) rolls.filter { it.deleteSidecars }.sumOf { it.sidecars.size } else 0
+    val renames = if (replace) rolls.filter { it.renameFolder && cleanName(it.newFolderName) != it.name } else emptyList()
     val noFilm = rolls.count { it.film.isBlank() }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Convert $n scans?") },
+        title = { Text(if (replace) "Convert and DELETE $n TIFFs?" else "Convert $n scans?") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { m.keepTiffs = false }) {
-                    RadioButton(selected = !m.keepTiffs, onClick = { m.keepTiffs = false })
-                    Text("Replace the TIFFs (each is deleted once its JPEG checks out)")
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (replace) {
+                    Text("All $n TIFF files will be permanently deleted, each one right after its JPEG is saved " +
+                        "and checked. They will not be in the Recycle bin.",
+                        color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold)
+                    if (side > 0) Text("$side info file(s) will also be deleted.")
+                    renames.forEach { Text("Folder renamed: ${it.name} → ${cleanName(it.newFolderName)}") }
+                } else {
+                    Text("The JPEGs are added next to the TIFFs. Nothing is deleted or renamed.")
                 }
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { m.keepTiffs = true }) {
-                    RadioButton(selected = m.keepTiffs, onClick = { m.keepTiffs = true })
-                    Text("Keep the TIFFs and add JPEGs beside them")
-                }
-                if (m.keepTiffs) Text("Nothing is deleted or renamed.", style = MaterialTheme.typography.bodySmall)
-                if (side > 0) Text("$side info file(s) will be deleted.")
                 if (noFilm > 0) Text("$noFilm roll(s) have no film stock set.", color = MaterialTheme.colorScheme.primary)
                 if (m.author.isBlank()) Text("No name set in Settings, so no copyright will be written.",
                     color = MaterialTheme.colorScheme.error)
-                else Text(Metadata.copyrightNotice(m.credits(), LocalDate.now().year).replace(LocalDate.now().year.toString(), "<scan year>"))
+                else Text(Metadata.copyrightNotice(m.credits(), LocalDate.now().year).replace(LocalDate.now().year.toString(), "<scan year>"),
+                    style = MaterialTheme.typography.bodySmall)
             }
         },
-        confirmButton = { Button(onClick = onGo) { Text("Convert") } },
+        confirmButton = {
+            Button(
+                onClick = onGo,
+                colors = if (replace) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError) else ButtonDefaults.buttonColors(),
+            ) { Text(if (replace) "Convert and delete" else "Convert") }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Back") } },
     )
 }
@@ -387,24 +552,35 @@ private fun SettingsScreen(m: AppModel) {
     }
 }
 
-/** Text field with a dropdown of suggestions; anything can be typed. */
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Text field with suggestions shown as chips under it while it's focused, plus a ▾ button for
+ * the full list. No popup opens while typing, which keeps typing quick.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ComboField(label: String, value: String, onValue: (String) -> Unit, options: List<String>) {
-    var open by remember { mutableStateOf(false) }
-    val shown = (if (value.isBlank()) options else options.filter { it.contains(value.trim(), ignoreCase = true) && it != value })
-        .distinct().take(40)
-    ExposedDropdownMenuBox(expanded = open && shown.isNotEmpty(), onExpandedChange = { open = it }) {
-        OutlinedTextField(
-            value = value,
-            onValueChange = { onValue(it); open = true },
-            label = { Text(label) },
-            singleLine = true,
-            trailingIcon = { if (options.isNotEmpty()) ExposedDropdownMenuDefaults.TrailingIcon(expanded = open && shown.isNotEmpty()) },
-            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable),
-        )
-        ExposedDropdownMenu(expanded = open && shown.isNotEmpty(), onDismissRequest = { open = false }) {
-            shown.forEach { o -> DropdownMenuItem(text = { Text(o) }, onClick = { onValue(o); open = false }) }
+private fun SuggestField(label: String, value: String, onValue: (String) -> Unit, options: List<String>) {
+    var focused by remember { mutableStateOf(false) }
+    var showAll by remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Box {
+            OutlinedTextField(
+                value = value, onValueChange = onValue, label = { Text(label) }, singleLine = true,
+                trailingIcon = if (options.isEmpty()) null else {
+                    { IconButton(onClick = { showAll = true }) { Text("▾", style = MaterialTheme.typography.titleLarge) } }
+                },
+                modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused },
+            )
+            DropdownMenu(expanded = showAll, onDismissRequest = { showAll = false }, modifier = Modifier.heightIn(max = 380.dp)) {
+                options.distinct().forEach { o -> DropdownMenuItem(text = { Text(o) }, onClick = { onValue(o); showAll = false }) }
+            }
+        }
+        if (focused && options.isNotEmpty()) {
+            val q = value.trim()
+            val matches = (if (q.isEmpty()) options else options.filter { it.contains(q, ignoreCase = true) && !it.equals(q, true) })
+                .distinct().take(6)
+            if (matches.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                matches.forEach { o -> SuggestionChip(onClick = { onValue(o) }, label = { Text(o) }) }
+            }
         }
     }
 }

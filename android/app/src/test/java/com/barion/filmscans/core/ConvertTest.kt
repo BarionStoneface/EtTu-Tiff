@@ -136,6 +136,20 @@ class ConvertTest {
         assertEquals("TOBEORNOTTOBEORTOBEORNOT", String(TiffReader.lzwDecode(bytes, 100)))
     }
 
+    @Test fun thumbnailSamplesPixels() {
+        val w = 100; val h = 60
+        val px = image(w, h, 3, 255)
+        for (strips in listOf(1, 7, 60)) {
+            val th = Thumbs.sample(TiffReader(Mem(tiff(w, h, 3, 8, px, rps = strips))), maxSide = 25)
+            assertEquals(25, th.width); assertEquals(15, th.height) // every 4th pixel
+            for (ty in 0 until th.height) for (tx in 0 until th.width) {
+                val i = ((ty * 4) * w + tx * 4) * 3
+                val want = (0xFF shl 24) or (px[i] shl 16) or (px[i + 1] shl 8) or px[i + 2]
+                assertEquals(want, th.argb[ty * th.width + tx])
+            }
+        }
+    }
+
     @Test fun dates() {
         assertEquals(LocalDateTime.of(2019, 4, 12, 14, 3, 22), Dates.parse("2019:04:12 14:03:22"))
         assertEquals(LocalDateTime.of(2019, 4, 12, 14, 5, 0), Dates.parse("2019-04-12T14:05:00+02:00"))
