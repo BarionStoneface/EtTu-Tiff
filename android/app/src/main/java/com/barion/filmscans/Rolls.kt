@@ -159,10 +159,11 @@ class UriSource private constructor(private val ch: FileChannel, private val clo
 
 object Rolls {
     /** Every folder (the picked one and up to 3 levels down) that holds TIFFs is a roll. */
-    fun find(ctx: Context, root: DocumentFile, onProgress: (String) -> Unit): List<Roll> {
+    fun find(ctx: Context, root: DocumentFile, zips: MutableList<DocumentFile>, onProgress: (String) -> Unit): List<Roll> {
         val out = mutableListOf<Roll>()
         fun walk(dir: DocumentFile, depth: Int) {
             val kids = dir.listFiles()
+            zips += kids.filter { it.isFile && ext(it.name ?: "") == "zip" && !(it.name ?: "").startsWith("._") }
             val tiffs = kids.filter { it.isFile && ext(it.name ?: "") in TIFF_EXT && !(it.name ?: "").startsWith("._") }
                 .sortedBy { it.name?.lowercase() }
             if (tiffs.isNotEmpty()) out += readRoll(ctx, dir, dir == root, kids, tiffs, onProgress)
@@ -226,7 +227,11 @@ object Rolls {
      * Last resort: the file's modified time. Unzipping usually keeps the original time,
      * but a download or copy may not, so this is flagged for checking.
      */
+    /** File dates kept from zips unzipped in this session, by file address. */
+    @Volatile var zipDates: Map<String, LocalDateTime> = emptyMap()
+
     private fun fileDate(doc: DocumentFile): DateFound {
+        zipDates[doc.uri.toString()]?.let { return DateFound(it, "file date inside the zip") }
         val t = doc.lastModified().takeIf { it > 0 } ?: System.currentTimeMillis()
         return DateFound(LocalDateTime.ofInstant(Instant.ofEpochMilli(t), ZoneId.systemDefault()).withNano(0),
             "file date, not stored in the scan", embedded = false)

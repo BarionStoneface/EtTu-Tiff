@@ -34,6 +34,9 @@ nothing leaves the phone.
 - **Drops location** and every other tag in the original.
 - **Writes your copyright** into EXIF, XMP and IPTC fields and a JPEG
   comment. You choose "all rights reserved" or a Creative Commons licence.
+- **Unzips lab downloads.** Pick the zip, including one that holds a zip per
+  roll. Inner zips are unpacked straight into their own folders, with no
+  second unzip step. File dates from the zip are used as a fallback scan date.
 - **Previews the roll first.** Thumbnails are read straight from the TIFFs
   before anything is converted.
 - **Renames in bulk.** You can use a pattern (`{name}`, `{nn}`, `{date}`,

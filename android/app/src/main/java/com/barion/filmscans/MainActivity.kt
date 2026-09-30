@@ -27,7 +27,7 @@ class MainActivity : ComponentActivity() {
             }
             // Keep the screen on while converting, so the phone doesn't sleep mid-roll.
             LaunchedEffect(model.phase) {
-                if (model.phase == Phase.Converting) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                if (model.phase == Phase.Converting || model.phase == Phase.Unzipping) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             }
             MaterialTheme(colorScheme = theme.colors(this)) { App(model) }

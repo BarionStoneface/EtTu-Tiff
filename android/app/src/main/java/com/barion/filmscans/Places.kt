@@ -54,6 +54,12 @@ object Places {
         return found.firstOrNull { it != null }
     }
 
+    /** Free space where [folder] lives, or null if it can't be told. */
+    fun freeBytes(folder: Uri): Long? = filePath(folder)?.let { runCatching { android.os.StatFs(it).availableBytes }.getOrNull() }
+
+    /** Where the destination picker opens: the phone's Pictures folder. */
+    val pictures: Uri = DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:Pictures")
+
     /** Opens the first photo in the gallery; swipe from there. */
     fun viewPhotos(ctx: Context, o: Output) {
         val folder = o.roll.outputUri ?: o.roll.folder.uri

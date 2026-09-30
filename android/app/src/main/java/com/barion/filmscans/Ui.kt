@@ -5,6 +5,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.AssistChip
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
@@ -97,11 +102,29 @@ private val MINUTE = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 fun App(m: AppModel) {
     var settings by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf(false) }
+    var leave by remember { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) m.open(uri)
     }
-    BackHandler(enabled = settings) { m.saveSettings(); settings = false }
-    BackHandler(enabled = !settings && (m.phase == Phase.Ready || m.phase == Phase.Done)) { m.reset() }
+    // Unzipping a download: pick the zip(s), then the folder the rolls should go in.
+    val destPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) m.unzipDownloads(uri) else m.pendingZips = emptyList()
+    }
+    val zipPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) { m.pendingZips = uris; destPicker.launch(Places.pictures) }
+    }
+    // Background previews pause while the keyboard is up.
+    val ime = WindowInsets.isImeVisible
+    LaunchedEffect(ime) { m.typing = ime }
+
+    val goBack: () -> Unit = {
+        when {
+            settings -> { m.saveSettings(); settings = false }
+            m.phase == Phase.Ready -> leave = true
+            m.phase == Phase.Done -> m.reset()
+        }
+    }
+    BackHandler(enabled = settings || m.phase == Phase.Ready || m.phase == Phase.Done, onBack = goBack)
 
     Scaffold(
         topBar = {
@@ -113,9 +136,14 @@ fun App(m: AppModel) {
                         withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)) { append("?") }
                     })
                 },
+                navigationIcon = {
+                    if (settings || m.phase == Phase.Ready || m.phase == Phase.Done)
+                        IconButton(onClick = goBack) { Text("←", style = MaterialTheme.typography.titleLarge) }
+                },
                 actions = {
                     if (settings) TextButton(onClick = { m.saveSettings(); settings = false }) { Text("Done") }
-                    else if (m.phase != Phase.Converting) TextButton(onClick = { settings = true }) { Text("Settings") }
+                    else if (m.phase != Phase.Converting && m.phase != Phase.Unzipping)
+                        TextButton(onClick = { settings = true }) { Text("Settings") }
                 },
             )
         },
@@ -146,8 +174,12 @@ fun App(m: AppModel) {
         Column(Modifier.padding(pad).consumeWindowInsets(pad).imePadding().fillMaxSize()) {
             when {
                 settings -> SettingsScreen(m)
-                m.phase == Phase.Start -> StartScreen(m) { picker.launch(null) }
+                m.phase == Phase.Start -> StartScreen(m, pick = { picker.launch(null) }, unzip = {
+                    zipPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/x-zip",
+                        "multipart/x-zip", "application/octet-stream"))
+                })
                 m.phase == Phase.Scanning -> Busy("Reading scans…", m.status)
+                m.phase == Phase.Unzipping -> UnzipScreen(m)
                 m.phase == Phase.Ready -> RollList(m)
                 m.phase == Phase.Converting -> ProgressScreen(m)
                 else -> DoneScreen(m)
@@ -156,10 +188,28 @@ fun App(m: AppModel) {
     }
 
     if (confirm) ConfirmDialog(m, onDismiss = { confirm = false }) { confirm = false; m.convert() }
+    if (leave) AlertDialog(
+        onDismissRequest = { leave = false },
+        title = { Text("Leave these rolls?") },
+        text = { Text("Nothing has been converted yet. The details you typed for these rolls will be cleared.") },
+        confirmButton = { TextButton(onClick = { leave = false; m.reset() }) { Text("Leave") } },
+        dismissButton = { TextButton(onClick = { leave = false }) { Text("Stay") } },
+    )
 }
 
 @Composable
-private fun StartScreen(m: AppModel, pick: () -> Unit) {
+private fun UnzipScreen(m: AppModel) {
+    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(m.status.ifEmpty { "Unzipping…" })
+        LinearProgressIndicator(progress = { m.progress }, modifier = Modifier.fillMaxWidth())
+        Text("Zips inside the zip are unpacked into their own folders as they're read. Keep the app open.",
+            style = MaterialTheme.typography.bodySmall)
+        m.log.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+    }
+}
+
+@Composable
+private fun StartScreen(m: AppModel, pick: () -> Unit, unzip: () -> Unit) {
     Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("Turns folders of TIFF scans into full-quality JPEGs, one roll per folder.",
             style = MaterialTheme.typography.bodyLarge)
@@ -169,7 +219,13 @@ private fun StartScreen(m: AppModel, pick: () -> Unit) {
         if (m.author.isBlank()) Text("Add your name in Settings first, so the copyright gets written.",
             color = MaterialTheme.colorScheme.primary)
         Button(onClick = pick, modifier = Modifier.fillMaxWidth()) { Text("Choose scans folder") }
-        Text("Pick a folder holding one roll, or a folder of roll folders.", style = MaterialTheme.typography.bodySmall)
+        Text("Pick a folder holding one roll, or a folder of roll folders. Zips in it can be unzipped from there.",
+            style = MaterialTheme.typography.bodySmall)
+        OutlinedButton(onClick = unzip, modifier = Modifier.fillMaxWidth()) { Text("Unzip a download (.zip)") }
+        Text("Pick the zip (zips inside it are handled too), then the folder the rolls should go in, e.g. " +
+            "Pictures. Android doesn't let apps save into the Download folder itself.",
+            style = MaterialTheme.typography.bodySmall)
+        DeleteZipsSwitch(m)
         if (m.status.isNotEmpty()) Text(m.status, color = MaterialTheme.colorScheme.error)
     }
 }
@@ -188,19 +244,75 @@ private fun Busy(title: String, detail: String) {
 @Composable
 private fun RollList(m: AppModel) {
     var preview by remember { mutableStateOf<ScanFile?>(null) }
-    LazyColumn(
-        Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item { ModeCard(m) }
-        item {
-            Text("${m.rolls.size} roll(s) in ${m.rootName}. Each roll starts blank — nothing carries over.",
-                style = MaterialTheme.typography.bodySmall)
+    val list = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val zipItems = if (m.zipsFound.isNotEmpty()) 1 else 0
+    val firstRoll = zipItems + 2 // zip card, mode card, count line
+    Column(Modifier.fillMaxSize()) {
+        if (m.rolls.size > 1) RollJumpRow(m.rolls) { i -> scope.launch { list.animateScrollToItem(firstRoll + i) } }
+        LazyColumn(
+            Modifier.fillMaxWidth().weight(1f),
+            state = list,
+            contentPadding = PaddingValues(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (zipItems > 0) item { ZipCard(m) }
+            item { ModeCard(m) }
+            item {
+                Text(if (m.rolls.isEmpty()) "No TIFFs here yet. Unzip above to get to the rolls inside."
+                    else "${m.rolls.size} roll(s) in ${m.rootName}. Each roll starts blank — nothing carries over.",
+                    style = MaterialTheme.typography.bodySmall)
+            }
+            itemsIndexed(m.rolls, key = { _, r -> r.folder.uri.toString() }) { i, r ->
+                val next = if (i < m.rolls.lastIndex) ({ scope.launch { list.animateScrollToItem(firstRoll + i + 1) }; Unit }) else null
+                RollCard(m, r, next) { f -> preview = f }
+            }
         }
-        items(m.rolls, key = { it.folder.uri.toString() }) { RollCard(m, it) { f -> preview = f } }
     }
     preview?.let { PreviewDialog(it) { preview = null } }
+}
+
+/** Jump straight to any roll. */
+@Composable
+private fun RollJumpRow(rolls: List<Roll>, onJump: (Int) -> Unit) {
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        itemsIndexed(rolls, key = { _, r -> r.folder.uri.toString() }) { i, r ->
+            AssistChip(onClick = { onJump(i) }, label = { Text(r.name, maxLines = 1) })
+        }
+    }
+}
+
+@Composable
+private fun ZipCard(m: AppModel) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Zip files here", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            m.zipsFound.forEach { z ->
+                Text("${z.name} · ${"%.1f".format(z.length() / 1e9)} GB", style = MaterialTheme.typography.bodySmall)
+            }
+            Text("Each is unzipped into a folder next to it; zips inside it are unpacked too.",
+                style = MaterialTheme.typography.bodySmall)
+            DeleteZipsSwitch(m)
+            Button(onClick = { m.unzipFound() }, modifier = Modifier.fillMaxWidth()) {
+                Text(if (m.zipsFound.size == 1) "Unzip it" else "Unzip all ${m.zipsFound.size}")
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeleteZipsSwitch(m: AppModel) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Delete the zip after unzipping")
+            if (m.deleteZips) Text("The zip is permanently deleted once everything in it is out.",
+                color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+        Switch(m.deleteZips, { m.deleteZips = it; m.saveSettings() })
+    }
 }
 
 /** The one choice that deletes files, stated plainly before anything happens. */
@@ -237,7 +349,7 @@ private fun ModeCard(m: AppModel) {
 }
 
 @Composable
-private fun RollCard(m: AppModel, r: Roll, onPreview: (ScanFile) -> Unit) {
+private fun RollCard(m: AppModel, r: Roll, onNext: (() -> Unit)?, onPreview: (ScanFile) -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             RollHeader(r)
@@ -252,6 +364,7 @@ private fun RollCard(m: AppModel, r: Roll, onPreview: (ScanFile) -> Unit) {
             HorizontalDivider()
             FolderSection(r, m.keepTiffs)
             RollProblems(r)
+            if (onNext != null) TextButton(onClick = onNext, modifier = Modifier.align(Alignment.End)) { Text("Next roll ↓") }
         }
     }
 }
