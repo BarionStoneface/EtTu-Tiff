@@ -10,12 +10,12 @@ val runNumber = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
 
 android {
     namespace = "com.barion.filmscans"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.barion.filmscans"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = runNumber
         versionName = "1.0.$runNumber"
     }
