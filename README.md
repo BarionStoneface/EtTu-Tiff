@@ -13,9 +13,12 @@ proper metadata.
 ## Get it
 
 Download the APK from [the latest release](../../releases/latest). You may
-need to allow installs from your browser. It needs Android 8 or later and
-asks for no permissions: you choose folders in Android's own picker, and
-nothing leaves the phone.
+need to allow installs from your browser. It needs Android 8 or later. It
+has no access to your storage beyond the folders you choose in Android's own
+picker, and nothing leaves the phone. The one thing it asks, the first time
+a long job starts, is to show notifications, so you can see an unzip or a
+conversion carry on while you're in other apps. It works the same if you say
+no.
 
 ## What it does
 

@@ -224,9 +224,10 @@ private fun UnzipScreen(m: AppModel) {
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(m.status.ifEmpty { "Unzipping…" })
         LinearProgressIndicator(progress = { m.progress }, modifier = Modifier.fillMaxWidth())
-        Text("Keep the app open. Each file only gets its real name once it's complete, so stopping is safe: " +
-            "unzipping the same zip again later carries on where it left off.", style = MaterialTheme.typography.bodySmall)
-        OutlinedButton(onClick = { m.stopUnzip() }) { Text("Stop after this file") }
+        Text("You can switch to other apps; progress shows in the notification. Each file only gets its real " +
+            "name once it's complete, so stopping is safe: unzipping the same zip again later carries on where it " +
+            "left off.", style = MaterialTheme.typography.bodySmall)
+        OutlinedButton(onClick = { m.stopWork() }) { Text("Stop after this file") }
         m.log.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
     }
 }
@@ -682,7 +683,8 @@ private fun ProgressScreen(m: AppModel) {
         LinearProgressIndicator(progress = { if (m.total == 0) 0f else m.done.toFloat() / m.total }, modifier = Modifier.fillMaxWidth())
         LinearProgressIndicator(progress = { m.fileProgress }, modifier = Modifier.fillMaxWidth(),
             color = MaterialTheme.colorScheme.secondary)
-        Text("Keep the app open until it's done.", style = MaterialTheme.typography.bodySmall)
+        Text("You can switch to other apps; progress shows in the notification.", style = MaterialTheme.typography.bodySmall)
+        OutlinedButton(onClick = { m.stopWork() }) { Text("Stop after the scans in progress") }
         LazyColumn(Modifier.fillMaxSize()) {
             itemsIndexed(m.log.reversed()) { _, line -> Text(line, style = MaterialTheme.typography.bodySmall) }
         }
