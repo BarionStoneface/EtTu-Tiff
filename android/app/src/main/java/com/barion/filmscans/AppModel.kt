@@ -24,7 +24,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicInteger
 
-enum class Phase { Start, Scanning, Unzipping, Ready, Converting, Done }
+enum class Phase { Start, Scanning, Planning, Plan, Unzipping, Ready, Converting, Done }
 
 data class Output(val roll: Roll, val count: Int, val firstJpeg: String?, val renamed: Boolean = false,
                   val media: android.net.Uri? = null) {
@@ -43,6 +43,10 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     var keepTiffs by mutableStateOf(prefs.getBoolean("keepTiffs", true))
     /** Delete a zip once everything in it is unzipped. Off unless chosen. */
     var deleteZips by mutableStateOf(prefs.getBoolean("deleteZips", false))
+    /** Starting point for each roll's "delete info files" switch. Off unless chosen. */
+    var deleteInfoFiles by mutableStateOf(prefs.getBoolean("deleteInfoFiles", false))
+    /** Give the lab's JPEGs a date taken when unzipping, so galleries sort them by scan date. */
+    var labJpegDates by mutableStateOf(prefs.getBoolean("labJpegDates", true))
     var theme by mutableStateOf(runCatching { AppTheme.valueOf(prefs.getString("theme", "")!!) }.getOrDefault(AppTheme.STUDIO))
 
     /** Past answers, offered in the dropdowns. Never filled in automatically. */
@@ -55,7 +59,8 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putString("author", author.trim()).putString("license", license.name)
             .putString("contact", contact.trim()).putInt("quality", quality)
             .putBoolean("keepTiffs", keepTiffs).putString("theme", theme.name)
-            .putBoolean("deleteZips", deleteZips).apply()
+            .putBoolean("deleteZips", deleteZips).putBoolean("deleteInfoFiles", deleteInfoFiles)
+            .putBoolean("labJpegDates", labJpegDates).apply()
     }
 
     private fun history(key: String): List<String> =
@@ -77,6 +82,8 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     var rootName by mutableStateOf("")
     val rolls = mutableStateListOf<Roll>()
     val log = mutableStateListOf<String>()
+    /** What happened when unzipping, kept on the rolls screen afterwards. */
+    val notes = mutableStateListOf<String>()
     var done by mutableIntStateOf(0)
     var total by mutableIntStateOf(0)
     var fileProgress by mutableFloatStateOf(0f)
@@ -95,7 +102,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
 
     fun open(uri: Uri) {
         val root = DocumentFile.fromTreeUri(getApplication(), uri) ?: return
-        unzipped.clear()
+        unzipped.clear(); notes.clear()
         scan(listOf(root), root.name ?: "")
     }
 
@@ -109,7 +116,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val zips = mutableListOf<DocumentFile>()
             val found = withContext(Dispatchers.IO) {
-                runCatching { where.flatMap { Rolls.find(ctx, it, zips) { s -> status = s } } }
+                runCatching { where.flatMap { Rolls.find(ctx, it, zips, deleteInfoFiles) { s -> status = s } } }
             }
             found.onSuccess { rolls.addAll(it) }.onFailure { status = "Couldn't read the folder: ${it.message}" }
             zipsFound.addAll(zips.filter { it.uri.toString() !in unzipped })
@@ -121,70 +128,142 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Zips picked from Downloads: unzip each into its own folder inside [destTree], then open those. */
+    /** The zips being planned or unzipped, each with your edits. */
+    val plans = mutableStateListOf<ZipPlan>()
+    /** Where to go back to from the plan. */
+    private var beforePlan = Phase.Start
+    @Volatile private var stop = false
+
+    /** Zips picked from Downloads: each will unzip into its own folder inside [destTree]. */
     fun unzipDownloads(destTree: Uri) {
         val ctx = getApplication<Application>()
         val dest = DocumentFile.fromTreeUri(ctx, destTree) ?: return
         val picked = pendingZips.mapNotNull { u -> DocumentFile.fromSingleUri(ctx, u)?.let { Triple(u, it.name ?: "download.zip", it) } }
         pendingZips = emptyList()
-        unzipAll(picked.map { (u, name, doc) -> Job3(u, name, doc.length(), dest) { doc.delete() } }, fallbackRoots = null)
+        makePlans(picked.map { (u, name, doc) -> Job3(u, name, doc.length(), dest) { doc.delete() } })
     }
 
-    /** Zips found inside the picked folder: unzip each next to itself, then rescan. */
+    /** Zips found inside the picked folder: each will unzip next to itself. */
     fun unzipFound() {
         val jobs = zipsFound.mapNotNull { z ->
             val parent = z.parentFile ?: return@mapNotNull null
             Job3(z.uri, z.name ?: "archive.zip", z.length(), parent) { z.delete() }
         }
-        unzipAll(jobs, fallbackRoots = roots)
+        makePlans(jobs)
     }
 
     private class Job3(val uri: Uri, val name: String, val size: Long, val dest: DocumentFile, val delete: () -> Boolean)
 
-    private fun unzipAll(jobs: List<Job3>, fallbackRoots: List<DocumentFile>?) {
+    /** Reads each zip's contents and dates, and shows the plan. Nothing is written yet. */
+    private fun makePlans(jobs: List<Job3>) {
         if (jobs.isEmpty()) return
         val ctx = getApplication<Application>()
-        saveSettings()
         thumbJob?.cancel()
+        closePlans()
+        beforePlan = if (phase == Phase.Ready) Phase.Ready else Phase.Start
+        phase = Phase.Planning
+        log.clear()
+        viewModelScope.launch {
+            for (j in jobs) {
+                status = "Reading ${j.name}…"
+                withContext(Dispatchers.IO) {
+                    runCatching { Unzip.plan(ctx, j.uri, j.name, j.size, j.dest, j.delete) { s -> status = "${j.name}: $s" } }
+                }.onSuccess { plans += it }.onFailure { log += "✗ ${it.message ?: j.name}" }
+            }
+            status = ""
+            phase = if (plans.isEmpty()) beforePlan else Phase.Plan
+            if (plans.isEmpty()) status = log.joinToString("\n")
+        }
+    }
+
+    fun leavePlan() {
+        closePlans()
+        phase = beforePlan
+        if (beforePlan == Phase.Ready) loadThumbnails()
+    }
+
+    private fun closePlans() { plans.forEach { it.close() }; plans.clear() }
+
+    override fun onCleared() { closePlans(); super.onCleared() }
+
+    /** Problems that stop the plan, across all the zips. */
+    fun planProblems(): List<String> {
+        val out = mutableListOf<String>()
+        val results = plans.map { it to it.build() }
+        results.forEach { (p, r) -> r?.conflicts?.forEach { out += "${p.zipName}: $it" } }
+        // Two zips unpacking to the same place.
+        val seen = HashMap<String, String>()
+        for ((p, r) in results) for (t in r?.targets.orEmpty()) {
+            val key = p.dest.uri.toString() + "|" + t.path.lowercase()
+            val other = seen.put(key, p.zipName)
+            if (other != null && other != p.zipName) { out += "${p.zipName} and $other would both save ${t.path}"; break }
+        }
+        results.forEach { (p, r) -> if (r != null && r.targets.isEmpty() && r.sealed.isEmpty()) out += "${p.zipName}: nothing is left to unzip" }
+        return out
+    }
+
+    fun stopUnzip() { stop = true }
+
+    fun startUnzip() {
+        if (plans.isEmpty()) return
+        val ctx = getApplication<Application>()
+        saveSettings()
+        val todo = plans.toList()
+        val datesForJpegs = labJpegDates
+        stop = false
         phase = Phase.Unzipping
         log.clear()
         viewModelScope.launch {
-            val result = Unzip.Result()
-            val total = jobs.sumOf { it.size.coerceAtLeast(1) }
+            val total = todo.sumOf { (it.build()?.bytes ?: it.zipSize).coerceAtLeast(1) }
             var before = 0L
-            for (j in jobs) {
-                // Check there's room first: the TIFFs take about as much space as the zip, or more.
-                val free = Places.freeBytes(j.dest.uri)
-                if (free != null && free < j.size * 13 / 10) {
-                    log += "✗ ${j.name}: not enough free space (needs about ${gb(j.size * 13 / 10)}, ${gb(free)} free)"
+            val tops = mutableListOf<DocumentFile>()
+            for (p in todo) {
+                val bytes = p.build()?.bytes ?: p.zipSize
+                // Check there's room first (with a little to spare).
+                val free = Places.freeBytes(p.dest.uri)
+                if (free != null && free < bytes + bytes / 20 + 50_000_000) {
+                    log += "✗ ${p.zipName}: not enough free space (needs about ${gb(bytes)}, ${gb(free)} free)"
                     continue
                 }
+                val out = Unzip.Outcome()
                 var lastShown = 0L
                 val ok = withContext(Dispatchers.IO) {
                     runCatching {
-                        Unzip.unzip(ctx, j.uri, j.name, j.dest, result) { n ->
+                        Unzip.run(ctx, p, datesForJpegs, out, { stop }) { n ->
                             if (n - lastShown > 4_000_000) {
                                 lastShown = n
-                                progress = (before + n).toFloat() / total
-                                status = "Unzipping ${j.name}: ${gb(n)} of ${gb(j.size)}"
+                                progress = ((before + n).toFloat() / total).coerceAtMost(1f)
+                                status = "Unzipping ${p.zipName}: ${gb(n)} of ${gb(bytes)}"
                             }
                         }
-                    }
+                    }.also { runCatching { ZipDates.putAll(ctx, out.dates) } }
                 }
-                before += j.size
+                before += bytes
+                tops += out.tops
+                val parts = listOfNotNull(
+                    "${out.written} file(s) unzipped",
+                    out.already.takeIf { it > 0 }?.let { "$it already there" },
+                    out.jpegsDated.takeIf { it > 0 }?.let { "$it JPEG(s) given their scan date" },
+                )
                 ok.onSuccess {
-                    unzipped += j.uri.toString()
-                    log += "✓ ${j.name} unzipped"
-                    if (deleteZips) log += if (withContext(Dispatchers.IO) { runCatching { j.delete() }.getOrDefault(false) })
-                        "  ${j.name} deleted" else "  ${j.name} couldn't be deleted; delete it in My Files"
-                }.onFailure { log += "✗ ${j.name}: ${it.message ?: it.javaClass.simpleName}" }
+                    unzipped += p.uri.toString()
+                    log += "✓ ${p.zipName}: ${parts.joinToString(", ")}"
+                    out.problems.forEach { log += "✗ $it" }
+                    if (deleteZips && out.problems.isEmpty()) log += if (withContext(Dispatchers.IO) { runCatching { p.delete() }.getOrDefault(false) })
+                        "  ${p.zipName} deleted" else "  ${p.zipName} couldn't be deleted; delete it in My Files"
+                }.onFailure {
+                    if (it is Unzip.Cancelled) log += "Stopped. ${parts.joinToString(", ")} from ${p.zipName}; " +
+                        "unzipping it again later carries on where this left off."
+                    else log += "✗ ${p.zipName}: ${it.message ?: it.javaClass.simpleName}"
+                    out.problems.forEach { log += "✗ $it" }
+                }
+                if (stop) break
             }
-            Rolls.zipDates = Rolls.zipDates + result.dates
-            val failed = log.filter { it.startsWith("✗") }
-            val where = fallbackRoots ?: result.tops
-            if (where.isEmpty()) { status = failed.joinToString("\n"); phase = Phase.Start; return@launch }
-            scan(where, if (fallbackRoots != null) rootName else result.tops.joinToString { it.name ?: "" })
-            if (failed.isNotEmpty()) status = failed.joinToString("\n")
+            closePlans()
+            notes.clear(); notes.addAll(log)
+            val where = if (beforePlan == Phase.Ready) roots else tops.distinctBy { it.uri.toString() }
+            if (where.isEmpty()) { status = log.joinToString("\n"); phase = Phase.Start; return@launch }
+            scan(where, if (beforePlan == Phase.Ready) rootName else where.joinToString { it.name ?: "" })
         }
     }
 
@@ -218,7 +297,8 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun reset() {
-        thumbJob?.cancel(); rolls.clear(); log.clear(); outputs.clear(); zipsFound.clear()
+        thumbJob?.cancel(); rolls.clear(); log.clear(); outputs.clear(); zipsFound.clear(); notes.clear()
+        closePlans()
         phase = Phase.Start; status = ""
     }
 

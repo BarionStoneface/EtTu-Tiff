@@ -10,6 +10,15 @@ interface ByteSource {
     fun read(pos: Long, buf: ByteArray, off: Int = 0, len: Int = buf.size)
 }
 
+/** Bytes already in memory, e.g. the start of a file read out of a zip. */
+class BytesSource(private val b: ByteArray) : ByteSource {
+    override val size = b.size.toLong()
+    override fun read(pos: Long, buf: ByteArray, off: Int, len: Int) {
+        if (pos < 0 || pos + len > b.size) throw java.io.EOFException("read past the end")
+        System.arraycopy(b, pos.toInt(), buf, off, len)
+    }
+}
+
 class TiffException(msg: String) : IOException(msg)
 
 /**

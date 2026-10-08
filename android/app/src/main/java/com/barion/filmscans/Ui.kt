@@ -88,6 +88,7 @@ import androidx.compose.ui.unit.dp
 import com.barion.filmscans.core.FILM_STOCKS
 import com.barion.filmscans.core.License
 import com.barion.filmscans.core.Metadata
+import com.barion.filmscans.core.Names
 import com.barion.filmscans.core.PROCESS_TAGS
 import com.barion.filmscans.core.isoFor
 import java.time.LocalDate
@@ -121,10 +122,12 @@ fun App(m: AppModel) {
         when {
             settings -> { m.saveSettings(); settings = false }
             m.phase == Phase.Ready -> leave = true
+            m.phase == Phase.Plan -> m.leavePlan()
             m.phase == Phase.Done -> m.reset()
         }
     }
-    BackHandler(enabled = settings || m.phase == Phase.Ready || m.phase == Phase.Done, onBack = goBack)
+    val canGoBack = settings || m.phase == Phase.Ready || m.phase == Phase.Plan || m.phase == Phase.Done
+    BackHandler(enabled = canGoBack, onBack = goBack)
 
     Scaffold(
         topBar = {
@@ -137,21 +140,38 @@ fun App(m: AppModel) {
                     })
                 },
                 navigationIcon = {
-                    if (settings || m.phase == Phase.Ready || m.phase == Phase.Done)
+                    if (canGoBack)
                         IconButton(onClick = goBack) { Text("←", style = MaterialTheme.typography.titleLarge) }
                 },
                 actions = {
                     if (settings) TextButton(onClick = { m.saveSettings(); settings = false }) { Text("Done") }
-                    else if (m.phase != Phase.Converting && m.phase != Phase.Unzipping)
+                    else if (m.phase != Phase.Converting && m.phase != Phase.Unzipping && m.phase != Phase.Planning)
                         TextButton(onClick = { settings = true }) { Text("Settings") }
                 },
             )
         },
         bottomBar = {
             // Hidden while typing, so the keyboard doesn't push it up over the fields.
+            if (!settings && m.phase == Phase.Plan && !WindowInsets.isImeVisible) {
+                val problems by remember { derivedStateOf { m.planProblems() } }
+                val files by remember { derivedStateOf { m.plans.sumOf { p -> p.build()?.targets?.size ?: 0 } } }
+                val bytes by remember { derivedStateOf { m.plans.sumOf { p -> p.build()?.bytes ?: p.zipSize } } }
+                val streamed = m.plans.any { it.listing == null || it.listing.sealed.isNotEmpty() }
+                Button(
+                    onClick = { m.startUnzip() },
+                    enabled = problems.isEmpty(),
+                    modifier = Modifier.navigationBarsPadding().fillMaxWidth().padding(16.dp),
+                ) {
+                    Text(when {
+                        problems.isNotEmpty() -> "Fix the issues marked in red"
+                        streamed && files == 0 -> "Unzip (${sizeText(bytes)})"
+                        else -> "Unzip $files file(s) · ${sizeText(bytes)}"
+                    })
+                }
+            }
             if (!settings && m.phase == Phase.Ready && !WindowInsets.isImeVisible) {
                 val n by remember { derivedStateOf { m.rolls.filter { it.include }.sumOf { it.files.size } } }
-                val blocked by remember { derivedStateOf { m.rolls.any { it.include && it.problems().isNotEmpty() } } }
+                val blocked by remember { derivedStateOf { m.rolls.any { it.include && it.problems(m.keepTiffs).isNotEmpty() } } }
                 val replace = !m.keepTiffs
                 Button(
                     onClick = { confirm = true },
@@ -179,6 +199,8 @@ fun App(m: AppModel) {
                         "multipart/x-zip", "application/octet-stream"))
                 })
                 m.phase == Phase.Scanning -> Busy("Reading scans…", m.status)
+                m.phase == Phase.Planning -> Busy("Reading the zip…", m.status)
+                m.phase == Phase.Plan -> PlanScreen(m)
                 m.phase == Phase.Unzipping -> UnzipScreen(m)
                 m.phase == Phase.Ready -> RollList(m)
                 m.phase == Phase.Converting -> ProgressScreen(m)
@@ -202,8 +224,9 @@ private fun UnzipScreen(m: AppModel) {
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(m.status.ifEmpty { "Unzipping…" })
         LinearProgressIndicator(progress = { m.progress }, modifier = Modifier.fillMaxWidth())
-        Text("Zips inside the zip are unpacked into their own folders as they're read. Keep the app open.",
-            style = MaterialTheme.typography.bodySmall)
+        Text("Keep the app open. Each file only gets its real name once it's complete, so stopping is safe: " +
+            "unzipping the same zip again later carries on where it left off.", style = MaterialTheme.typography.bodySmall)
+        OutlinedButton(onClick = { m.stopUnzip() }) { Text("Stop after this file") }
         m.log.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
     }
 }
@@ -223,7 +246,8 @@ private fun StartScreen(m: AppModel, pick: () -> Unit, unzip: () -> Unit) {
             style = MaterialTheme.typography.bodySmall)
         OutlinedButton(onClick = unzip, modifier = Modifier.fillMaxWidth()) { Text("Unzip a download (.zip)") }
         Text("Pick the zip (zips inside it are handled too), then the folder the rolls should go in, e.g. " +
-            "Pictures. Android doesn't let apps save into the Download folder itself.",
+            "Pictures. Android doesn't let apps save into the Download folder itself. You'll see everything " +
+            "that's in it, and can rename or leave out folders, before anything is written.",
             style = MaterialTheme.typography.bodySmall)
         DeleteZipsSwitch(m)
         if (m.status.isNotEmpty()) Text(m.status, color = MaterialTheme.colorScheme.error)
@@ -246,8 +270,8 @@ private fun RollList(m: AppModel) {
     var preview by remember { mutableStateOf<ScanFile?>(null) }
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val zipItems = if (m.zipsFound.isNotEmpty()) 1 else 0
-    val firstRoll = zipItems + 2 // zip card, mode card, count line
+    val zipItems = (if (m.zipsFound.isNotEmpty()) 1 else 0) + (if (m.notes.isNotEmpty()) 1 else 0)
+    val firstRoll = zipItems + 2 // notes and zip cards, mode card, count line
     Column(Modifier.fillMaxSize()) {
         if (m.rolls.size > 1) RollJumpRow(m.rolls) { i -> scope.launch { list.animateScrollToItem(firstRoll + i) } }
         LazyColumn(
@@ -256,7 +280,8 @@ private fun RollList(m: AppModel) {
             contentPadding = PaddingValues(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (zipItems > 0) item { ZipCard(m) }
+            if (m.notes.isNotEmpty()) item { NotesCard(m) }
+            if (m.zipsFound.isNotEmpty()) item { ZipCard(m) }
             item { ModeCard(m) }
             item {
                 Text(if (m.rolls.isEmpty()) "No TIFFs here yet. Unzip above to get to the rolls inside."
@@ -285,6 +310,23 @@ private fun RollJumpRow(rolls: List<Roll>, onJump: (Int) -> Unit) {
     }
 }
 
+/** What happened while unzipping, until you move on. */
+@Composable
+private fun NotesCard(m: AppModel) {
+    var open by remember { mutableStateOf(m.notes.any { it.startsWith("✗") || it.startsWith("Stopped") }) }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            val bad = m.notes.count { it.startsWith("✗") }
+            Text(if (bad == 0) "Unzipped" else "Unzipped, with $bad problem(s)", style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold, color = if (bad == 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error)
+            val shown = if (open) m.notes else m.notes.take(2)
+            shown.forEach { Text(it, style = MaterialTheme.typography.bodySmall,
+                color = if (it.startsWith("✗")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface) }
+            if (m.notes.size > 2) TextButton(onClick = { open = !open }) { Text(if (open) "Show less" else "Show all ${m.notes.size}") }
+        }
+    }
+}
+
 @Composable
 private fun ZipCard(m: AppModel) {
     Card(Modifier.fillMaxWidth()) {
@@ -293,18 +335,18 @@ private fun ZipCard(m: AppModel) {
             m.zipsFound.forEach { z ->
                 Text("${z.name} · ${"%.1f".format(z.length() / 1e9)} GB", style = MaterialTheme.typography.bodySmall)
             }
-            Text("Each is unzipped into a folder next to it; zips inside it are unpacked too.",
+            Text("Each is unzipped into a folder next to it; zips inside it are unpacked too. You'll see what's inside first.",
                 style = MaterialTheme.typography.bodySmall)
             DeleteZipsSwitch(m)
             Button(onClick = { m.unzipFound() }, modifier = Modifier.fillMaxWidth()) {
-                Text(if (m.zipsFound.size == 1) "Unzip it" else "Unzip all ${m.zipsFound.size}")
+                Text(if (m.zipsFound.size == 1) "Look inside" else "Look inside all ${m.zipsFound.size}")
             }
         }
     }
 }
 
 @Composable
-private fun DeleteZipsSwitch(m: AppModel) {
+internal fun DeleteZipsSwitch(m: AppModel) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("Delete the zip after unzipping")
@@ -356,6 +398,7 @@ private fun RollCard(m: AppModel, r: Roll, onNext: (() -> Unit)?, onPreview: (Sc
             if (!r.include) return@Column
             ThumbStrip(r, onPreview)
             RollFacts(r)
+            if (m.rolls.size > 1) CopyDetails(r, m.rolls)
             MetaFields(r, m.cameras, m.lenses, m.labs, m.customFilms)
             TagChips(r)
             DateOverride(r)
@@ -363,7 +406,7 @@ private fun RollCard(m: AppModel, r: Roll, onNext: (() -> Unit)?, onPreview: (Sc
             NamesSection(r, onPreview)
             HorizontalDivider()
             FolderSection(r, m.keepTiffs)
-            RollProblems(r)
+            RollProblems(r, m.keepTiffs)
             if (onNext != null) TextButton(onClick = onNext, modifier = Modifier.align(Alignment.End)) { Text("Next roll ↓") }
         }
     }
@@ -437,6 +480,29 @@ private fun RollFacts(r: Roll) {
     val bits = remember(r) { r.files.map { it.bits }.distinct().filter { it > 8 } }
     if (bits.isNotEmpty()) Text("${bits.joinToString("/")}-bit scans: JPEG holds 8 bits per channel, so they're rounded to 8.",
         style = MaterialTheme.typography.bodySmall)
+    val sources = remember(r) {
+        r.files.filter { it.date.embedded }.groupingBy { plainSource(it.date.source) }.eachCount().entries
+            .sortedByDescending { it.value }.joinToString { "${it.key} (${it.value})" }
+    }
+    if (sources.isNotEmpty()) Text("Scan dates from: $sources", style = MaterialTheme.typography.bodySmall)
+}
+
+/** "XMP xmp:MetadataDate" → "XMP MetadataDate". */
+fun plainSource(s: String) = s.replace(Regex("""XMP (xmp|exif|photoshop):"""), "XMP ")
+
+/** Fills this roll in from another one, only when asked. */
+@Composable
+private fun CopyDetails(r: Roll, rolls: List<Roll>) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { open = true }) { Text("Copy details from another roll…") }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            rolls.filter { it !== r }.forEach { o ->
+                val what = listOf(o.camera, o.film).filter { it.isNotBlank() }.joinToString(", ").ifEmpty { "nothing filled in yet" }
+                DropdownMenuItem(text = { Text("${o.name} — $what") }, onClick = { r.copyDetailsFrom(o); open = false })
+            }
+        }
+    }
 }
 
 @Composable
@@ -444,7 +510,10 @@ private fun MetaFields(r: Roll, cameras: List<String>, lenses: List<String>, lab
     SuggestField("Camera body", r.camera, { r.camera = it }, cameras)
     SuggestField("Lens (optional)", r.lens, { r.lens = it }, lenses)
     val films = remember(customFilms.size) { customFilms + FILM_STOCKS.map { it.name } }
-    SuggestField("Film stock", r.film, { r.film = it; isoFor(it)?.let { iso -> r.iso = iso.toString() } }, films)
+    SuggestField("Film stock", r.film, {
+        r.film = it; isoFor(it)?.let { iso -> r.iso = iso.toString() }
+        if ("{film}" in r.before + r.after) r.applyNames()
+    }, films)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(r.iso, { v -> r.iso = v.filter { it.isDigit() }.take(5) }, label = { Text("Box ISO") },
             singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -472,27 +541,46 @@ private fun TagChips(r: Roll) {
     }
 }
 
+/**
+ * Scans with no date inside them and none from a zip. Their file dates on the phone are often just
+ * the download date, so they're never used without asking.
+ */
 @Composable
 private fun DateOverride(r: Roll) {
     if (r.undated == 0) return
-    Text("${r.undated} scan(s) have no date stored inside them; the file date is shown instead and may be " +
-        "the download date. Enter the real scan date to use it for those.",
+    val span = remember(r) {
+        val d = r.undatedFiles.map { it.date.date.toLocalDate() }.distinct().sorted()
+        if (d.size <= 1) d.firstOrNull()?.let { DAY.format(it) } ?: "" else "${DAY.format(d.first())} to ${DAY.format(d.last())}"
+    }
+    Text("${r.undated} scan(s) have no scan date stored in them. Their file dates on the phone say $span, " +
+        "which may just be when they were downloaded.",
         color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
     OutlinedTextField(r.dateOverride, { r.dateOverride = it }, singleLine = true,
         label = { Text("Scan date, e.g. 2019-04-12 or 2019-04-12 14:30") }, modifier = Modifier.fillMaxWidth())
+    if (r.dateOverride.isBlank()) Row(Modifier.fillMaxWidth().clickable { r.useFileDates = !r.useFileDates },
+        verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(r.useFileDates, { r.useFileDates = it })
+        Text("Use their file dates ($span) instead", style = MaterialTheme.typography.bodyMedium)
+    }
 }
 
 @Composable
 private fun NamesSection(r: Roll, onPreview: (ScanFile) -> Unit) {
     var showNames by remember { mutableStateOf(false) }
     Text("File names", fontWeight = FontWeight.SemiBold)
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(r.pattern, { r.pattern = it; r.applyPattern() }, singleLine = true, label = { Text("Pattern") },
+    Text("The lab's file name is kept whole. Add text before or after it if you like.", style = MaterialTheme.typography.bodySmall)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(r.before, { r.before = it; r.applyNames() }, singleLine = true, label = { Text("Before") },
             modifier = Modifier.weight(1f))
-        OutlinedButton(onClick = { r.applyPattern() }) { Text("Re-apply") }
+        OutlinedTextField(r.join, { r.join = it.take(3); r.applyNames() }, singleLine = true, label = { Text("Join") },
+            modifier = Modifier.width(76.dp))
+        OutlinedTextField(r.after, { r.after = it; r.applyNames() }, singleLine = true, label = { Text("After") },
+            modifier = Modifier.weight(1f))
     }
-    Text("{name} original · {nn} 01, {nnn} 001 · {date} · {roll} · {film}. The original name is always " +
-        "stored inside the JPEG.", style = MaterialTheme.typography.bodySmall)
+    Text("You can use ${Names.TOKENS_HELP}. First file: ${r.files.first().newName}.jpg",
+        style = MaterialTheme.typography.bodySmall)
+    if (r.labNameDropped()) Text("Some names no longer have the lab's name in them. It's still stored inside each JPEG.",
+        color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
     TextButton(onClick = { showNames = !showNames }) {
         Text(if (showNames) "Hide names" else "Edit names one by one (${r.files.first().newName}.jpg, …)")
     }
@@ -518,11 +606,14 @@ private fun FolderSection(r: Roll, keep: Boolean) {
         Text("Rename folder", Modifier.weight(1f))
         Switch(r.renameFolder, { r.renameFolder = it })
     }
-    if (r.renameFolder) OutlinedTextField(r.newFolderName, { r.newFolderName = it }, singleLine = true,
+    if (r.renameFolder) OutlinedTextField(r.newFolderName, {
+        r.newFolderName = it
+        if ("{roll}" in r.before + r.after) r.applyNames()
+    }, singleLine = true,
         label = { Text("New folder name") }, modifier = Modifier.fillMaxWidth())
     if (r.sidecars.isNotEmpty()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Delete ${r.sidecars.size} info file(s)", Modifier.weight(1f))
+            Text("Also delete ${r.sidecars.size} info file(s)", Modifier.weight(1f))
             Switch(r.deleteSidecars, { r.deleteSidecars = it })
         }
         Text(r.sidecars.joinToString { (it.name ?: "?") + if (it.isDirectory) "/" else "" },
@@ -531,11 +622,15 @@ private fun FolderSection(r: Roll, keep: Boolean) {
 }
 
 @Composable
-private fun RollProblems(r: Roll) {
+private fun RollProblems(r: Roll, keepTiffs: Boolean) {
     val replacing = r.replacing()
-    if (replacing.isNotEmpty()) Text("Will overwrite existing JPEGs: ${replacing.joinToString()}",
-        color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
-    r.problems().forEach { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+    if (replacing.isNotEmpty()) Row(Modifier.fillMaxWidth().clickable { r.overwrite = !r.overwrite }, verticalAlignment = Alignment.Top) {
+        Checkbox(r.overwrite, { r.overwrite = it })
+        Text("Replace the JPEG(s) already there with these names: ${replacing.take(6).joinToString()}" +
+            if (replacing.size > 6) " and ${replacing.size - 6} more" else "",
+            style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 12.dp))
+    }
+    r.problems(keepTiffs).forEach { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
 }
 
 @Composable
@@ -544,6 +639,7 @@ private fun ConfirmDialog(m: AppModel, onDismiss: () -> Unit, onGo: () -> Unit) 
     val n = rolls.sumOf { it.files.size }
     val replace = !m.keepTiffs
     val side = if (replace) rolls.filter { it.deleteSidecars }.sumOf { it.sidecars.size } else 0
+    val overwrites = rolls.filter { it.overwrite }.sumOf { it.replacing().size }
     val renames = if (replace) rolls.filter { it.renameFolder && cleanName(it.newFolderName) != it.name } else emptyList()
     val noFilm = rolls.count { it.film.isBlank() }
     AlertDialog(
@@ -560,6 +656,7 @@ private fun ConfirmDialog(m: AppModel, onDismiss: () -> Unit, onGo: () -> Unit) 
                 } else {
                     Text("The JPEGs are added next to the TIFFs. Nothing is deleted or renamed.")
                 }
+                if (overwrites > 0) Text("$overwrites JPEG(s) already in the folders will be replaced.")
                 if (noFilm > 0) Text("$noFilm roll(s) have no film stock set.", color = MaterialTheme.colorScheme.primary)
                 if (m.author.isBlank()) Text("No name set in Settings, so no copyright will be written.",
                     color = MaterialTheme.colorScheme.error)
@@ -658,6 +755,17 @@ private fun SettingsScreen(m: AppModel) {
                 { l -> m.theme = AppTheme.entries.first { it.label == l } }, Modifier.fillMaxWidth())
         }
         item {
+            SettingSwitch("Delete info files when replacing TIFFs", m.deleteInfoFiles, { m.deleteInfoFiles = it },
+                "The starting choice for each roll: .thm, .xmp and similar files next to the TIFFs. Only ever " +
+                    "deleted when you replace the TIFFs, and each roll can still change it. Off: they're kept.")
+        }
+        item {
+            SettingSwitch("Date the lab's JPEGs when unzipping", m.labJpegDates, { m.labJpegDates = it },
+                "A JPEG with no date taken gets its scan date (from its own XMP data, or failing that its date " +
+                    "in the zip), so galleries sort it by when it was scanned, not when it was unzipped. Nothing else " +
+                    "in the file is changed.")
+        }
+        item {
             Text("JPEG quality: ${m.quality}${if (m.quality == 100) " (best)" else ""}")
             Slider(value = m.quality.toFloat(), onValueChange = { m.quality = it.toInt() }, valueRange = 85f..100f, steps = 14)
             Text("Colour is always stored at full resolution (4:4:4).", style = MaterialTheme.typography.bodySmall)
@@ -697,6 +805,20 @@ private fun SuggestField(label: String, value: String, onValue: (String) -> Unit
         }
     }
 }
+
+@Composable
+internal fun SettingSwitch(title: String, on: Boolean, set: (Boolean) -> Unit, detail: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(title)
+            Text(detail, style = MaterialTheme.typography.bodySmall)
+        }
+        Switch(on, set)
+    }
+}
+
+/** "1.4 GB", "350 MB". */
+fun sizeText(b: Long): String = if (b >= 1_000_000_000) "%.1f GB".format(b / 1e9) else "%d MB".format((b + 999_999) / 1_000_000)
 
 /** Fixed choice list. */
 @OptIn(ExperimentalMaterial3Api::class)
