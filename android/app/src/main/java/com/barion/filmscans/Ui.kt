@@ -181,11 +181,7 @@ fun App(m: AppModel) {
                     // Above the phone's navigation bar / gesture area, not under it.
                     modifier = Modifier.navigationBarsPadding().fillMaxWidth().padding(16.dp),
                 ) {
-                    Text(when {
-                        blocked -> "Fix the issues marked in red"
-                        replace -> "Convert $n and delete the TIFFs"
-                        else -> "Convert $n, keep the TIFFs"
-                    })
+                    Text(if (blocked) "Fix the issues marked in red" else actionLabel(m.rolls.filter { it.include }, replace))
                 }
             }
         },
@@ -235,7 +231,8 @@ private fun UnzipScreen(m: AppModel) {
 @Composable
 private fun StartScreen(m: AppModel, pick: () -> Unit, unzip: () -> Unit) {
     Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text("Turns folders of TIFF scans into full-quality JPEGs, one roll per folder.",
+        Text("Turns folders of TIFF scans into full-quality JPEGs, one roll per folder, and tags the lab's own " +
+            "JPEGs with the same details without re-saving them.",
             style = MaterialTheme.typography.bodyLarge)
         Text("Keeps the pixels, colour profile, DPI, scanner and original scan date. Drops location and " +
             "everything else, then adds your camera, film, push/pull and copyright. JPEGs are saved in the " +
@@ -358,33 +355,56 @@ internal fun DeleteZipsSwitch(m: AppModel) {
     }
 }
 
+/** "Convert 36 and tag 36, keep the originals". */
+private fun actionLabel(rolls: List<Roll>, replace: Boolean): String {
+    val tiffs = rolls.filter { !it.jpegRoll }.sumOf { it.files.size }
+    val jpegs = rolls.filter { it.jpegRoll }.sumOf { it.files.size }
+    val what = listOfNotNull(tiffs.takeIf { it > 0 }?.let { "Convert $it" }, jpegs.takeIf { it > 0 }?.let { if (tiffs > 0) "tag $it" else "Tag $it" })
+        .joinToString(" and ").ifEmpty { "Convert 0" }
+    return when {
+        !replace -> "$what, keep the originals"
+        tiffs > 0 -> "$what, delete the TIFFs"
+        else -> "$what in place"
+    }
+}
+
 /** The one choice that deletes files, stated plainly before anything happens. */
 @Composable
 private fun ModeCard(m: AppModel) {
     val replace = !m.keepTiffs
+    val hasJpegs = m.rolls.any { it.jpegRoll }
+    val hasTiffs = m.rolls.any { !it.jpegRoll }
     Card(
         Modifier.fillMaxWidth(),
         colors = if (replace) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer,
             contentColor = MaterialTheme.colorScheme.onErrorContainer) else CardDefaults.cardColors(),
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("What happens to the TIFFs?", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Text(if (hasJpegs) "What happens to the originals?" else "What happens to the TIFFs?",
+                style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
             Row(Modifier.fillMaxWidth().clickable { m.keepTiffs = true }, verticalAlignment = Alignment.Top) {
                 RadioButton(selected = m.keepTiffs, onClick = { m.keepTiffs = true })
                 Column(Modifier.padding(top = 12.dp)) {
                     Text("Keep them", fontWeight = FontWeight.SemiBold)
-                    Text("The JPEGs are added next to the TIFFs. Nothing is deleted or renamed.",
-                        style = MaterialTheme.typography.bodySmall)
+                    Text(listOfNotNull(
+                        if (hasTiffs) "The JPEGs are added next to the TIFFs." else null,
+                        if (hasJpegs) "The lab's JPEGs are copied, tagged, into a new folder beside each roll." else null,
+                        "Nothing is deleted or renamed.",
+                    ).joinToString(" "), style = MaterialTheme.typography.bodySmall)
                 }
             }
             Row(Modifier.fillMaxWidth().clickable { m.keepTiffs = false }, verticalAlignment = Alignment.Top) {
                 RadioButton(selected = replace, onClick = { m.keepTiffs = false })
                 Column(Modifier.padding(top = 12.dp)) {
-                    Text("Replace them: DELETE the TIFFs", fontWeight = FontWeight.SemiBold,
+                    Text(if (hasTiffs) "Replace them: DELETE the TIFFs" else "Replace them: tag the JPEGs in place",
+                        fontWeight = FontWeight.SemiBold,
                         color = if (replace) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.error)
-                    Text("Each TIFF is permanently deleted once its JPEG is saved and checked. Deleted TIFFs do " +
-                        "not go to the Recycle bin, so keep a backup if you might want them.",
-                        style = MaterialTheme.typography.bodySmall)
+                    Text(listOfNotNull(
+                        if (hasTiffs) "Each TIFF is permanently deleted once its JPEG is saved and checked. Deleted TIFFs do " +
+                            "not go to the Recycle bin, so keep a backup if you might want them." else null,
+                        if (hasJpegs) "The lab's JPEGs get the new details and names in place. Their pictures aren't " +
+                            "re-saved, but their old details (including any location) are replaced." else null,
+                    ).joinToString(" "), style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -427,7 +447,10 @@ private fun RollHeader(r: Roll) {
                     0 -> ""; 1 -> DAY.format(dates[0]); else -> "${DAY.format(dates.first())} to ${DAY.format(dates.last())}"
                 }
             }
-            Text("${r.files.size} scans · scanned $span", style = MaterialTheme.typography.bodySmall)
+            Text(if (r.jpegRoll) "${r.files.size} lab JPEGs to tag, pictures untouched · scanned $span"
+                else "${r.files.size} scans · scanned $span", style = MaterialTheme.typography.bodySmall)
+            if (r.alreadyTagged) Text("Already tagged by this app, so left unticked. Tick to tag again.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
         }
     }
 }
@@ -599,8 +622,14 @@ private fun NameRow(f: ScanFile, onPreview: (ScanFile) -> Unit) {
 
 @Composable
 private fun FolderSection(r: Roll, keep: Boolean) {
+    if (keep && r.jpegRoll) {
+        OutlinedTextField(r.copiesFolder, { r.copiesFolder = it }, singleLine = true,
+            label = { Text("New folder for the tagged copies") }, modifier = Modifier.fillMaxWidth())
+        Text("It's made next to ${r.name}; the originals stay as they are.", style = MaterialTheme.typography.bodySmall)
+        return
+    }
     if (keep) {
-        Text("Folder name and info files stay as they are (keeping the TIFFs).", style = MaterialTheme.typography.bodySmall)
+        Text("Folder name and info files stay as they are (keeping the originals).", style = MaterialTheme.typography.bodySmall)
         return
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -624,7 +653,7 @@ private fun FolderSection(r: Roll, keep: Boolean) {
 
 @Composable
 private fun RollProblems(r: Roll, keepTiffs: Boolean) {
-    val replacing = r.replacing()
+    val replacing = r.replacing(keepTiffs)
     if (replacing.isNotEmpty()) Row(Modifier.fillMaxWidth().clickable { r.overwrite = !r.overwrite }, verticalAlignment = Alignment.Top) {
         Checkbox(r.overwrite, { r.overwrite = it })
         Text("Replace the JPEG(s) already there with these names: ${replacing.take(6).joinToString()}" +
@@ -640,22 +669,32 @@ private fun ConfirmDialog(m: AppModel, onDismiss: () -> Unit, onGo: () -> Unit) 
     val n = rolls.sumOf { it.files.size }
     val replace = !m.keepTiffs
     val side = if (replace) rolls.filter { it.deleteSidecars }.sumOf { it.sidecars.size } else 0
-    val overwrites = rolls.filter { it.overwrite }.sumOf { it.replacing().size }
+    val overwrites = rolls.filter { it.overwrite }.sumOf { it.replacing(m.keepTiffs).size }
+    val tiffs = rolls.filter { !it.jpegRoll }.sumOf { it.files.size }
+    val jpegs = rolls.filter { it.jpegRoll }.sumOf { it.files.size }
     val renames = if (replace) rolls.filter { it.renameFolder && cleanName(it.newFolderName) != it.name } else emptyList()
     val noFilm = rolls.count { it.film.isBlank() }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (replace) "Convert and DELETE $n TIFFs?" else "Convert $n scans?") },
+        title = { Text(when {
+            replace && tiffs > 0 -> "Convert and DELETE $tiffs TIFFs?"
+            replace -> "Tag $jpegs JPEGs in place?"
+            else -> actionLabel(rolls, false) + "?"
+        }) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (replace) {
-                    Text("All $n TIFF files will be permanently deleted, each one right after its JPEG is saved " +
+                    if (tiffs > 0) Text("All $tiffs TIFF files will be permanently deleted, each one right after its JPEG is saved " +
                         "and checked. They will not be in the Recycle bin.",
                         color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold)
+                    if (jpegs > 0) Text("$jpegs lab JPEG(s) get the new details and names in place; their old details are " +
+                        "replaced. The pictures themselves aren't re-saved.")
                     if (side > 0) Text("$side info file(s) will also be deleted.")
                     renames.forEach { Text("Folder renamed: ${it.name} → ${cleanName(it.newFolderName)}") }
                 } else {
-                    Text("The JPEGs are added next to the TIFFs. Nothing is deleted or renamed.")
+                    if (tiffs > 0) Text("The JPEGs are added next to the TIFFs.")
+                    rolls.filter { it.jpegRoll }.forEach { Text("${it.name}: tagged copies go into a new folder, ${cleanName(it.copiesFolder)}") }
+                    Text("Nothing is deleted or renamed.")
                 }
                 if (overwrites > 0) Text("$overwrites JPEG(s) already in the folders will be replaced.")
                 if (noFilm > 0) Text("$noFilm roll(s) have no film stock set.", color = MaterialTheme.colorScheme.primary)
@@ -670,7 +709,7 @@ private fun ConfirmDialog(m: AppModel, onDismiss: () -> Unit, onGo: () -> Unit) 
                 onClick = onGo,
                 colors = if (replace) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error,
                     contentColor = MaterialTheme.colorScheme.onError) else ButtonDefaults.buttonColors(),
-            ) { Text(if (replace) "Convert and delete" else "Convert") }
+            ) { Text(when { replace && tiffs > 0 -> "Convert and delete"; replace -> "Tag in place"; tiffs > 0 -> "Convert"; else -> "Tag" }) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Back") } },
     )

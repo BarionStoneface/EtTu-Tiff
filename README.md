@@ -2,9 +2,9 @@
 
 *Veni, vidi, JPEG'd.*
 
-Turns film-scan TIFFs into full-quality JPEGs, one roll at a time. It keeps
-what matters from the scan, drops what doesn't, and writes your own film and
-copyright details into every photo.
+Turns film-scan TIFFs into full-quality JPEGs, and tags the lab's own JPEGs,
+one roll at a time. It keeps what matters from the scan, drops what doesn't,
+and writes your own film and copyright details into every photo.
 
 Built for film photographers whose lab or scanner hands them folders of huge
 TIFFs, and who want JPEGs that are smaller but lose nothing visible and carry
@@ -59,6 +59,13 @@ no.
   the zip). Galleries then sort it by when it was scanned, not when it was
   unzipped. Nothing else in the file changes, and it can be turned off. The
   zip's dates are also remembered for the TIFFs after the app closes.
+- **Tags the lab's JPEGs too, without re-saving them.** Most labs send JPEGs
+  as standard and TIFFs only as an extra. A folder of the lab's JPEGs gets the
+  same roll details, copyright, dates and names as a converted scan, but the
+  picture data is copied byte for byte, so nothing about the image changes.
+  Their old details, location included, are replaced; the colour profile is
+  kept. Keeping the originals puts tagged copies in a new folder beside the
+  roll; replacing them tags them in place.
 - **Previews the roll first.** Thumbnails are read straight from the TIFFs
   before anything is converted.
 - **Keeps the lab's file names.** Text is added before or after the lab's name,

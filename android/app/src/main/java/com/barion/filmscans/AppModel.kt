@@ -129,7 +129,7 @@ class AppModel(private val app: Application) {
             loadThumbnails()
             val any = rolls.isNotEmpty() || zipsFound.isNotEmpty()
             phase = if (any) Phase.Ready else Phase.Start
-            if (!any && found.isSuccess) status = "No TIFF or zip files in that folder."
+            if (!any && found.isSuccess) status = "No TIFFs, JPEGs or zips in that folder."
             else if (any) status = ""
         }
     }
