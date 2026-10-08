@@ -10,9 +10,9 @@ import java.util.zip.ZipInputStream
  * it ("Order.zip" holding "Roll 1.zip" gives "Roll 1/scan001.tif"), so nothing is unzipped twice.
  */
 object ZipWalk {
-    /** Junk that zips made on a Mac or Windows carry along. */
-    private val SKIP = Regex("""(^|/)(__MACOSX/|\._)|(^|/)(\.DS_Store|Thumbs\.db|desktop\.ini)$""", RegexOption.IGNORE_CASE)
-    private const val MAX_DEPTH = 4
+    private const val MAX_DEPTH = Archive.MAX_DEPTH
+    // Names not marked as UTF-8 are old DOS names; the default (UTF-8) would stop the whole walk on them.
+    private val NAMES = runCatching { java.nio.charset.Charset.forName("IBM437") }.getOrDefault(Charsets.ISO_8859_1)
 
     /** Lets an inner zip be read without closing the outer one. */
     private class NoClose(input: InputStream) : FilterInputStream(input) { override fun close() {} }
@@ -24,15 +24,12 @@ object ZipWalk {
     fun walk(input: InputStream, visit: (String, InputStream, Long) -> Unit) = walk(input, visit, "", 0)
 
     private fun walk(input: InputStream, visit: (String, InputStream, Long) -> Unit, prefix: String, depth: Int) {
-        val zis = ZipInputStream(input)
+        val zis = ZipInputStream(input, NAMES)
         while (true) {
             val e = zis.nextEntry ?: break
-            val path = e.name.replace('\\', '/').trimStart('/')
-            if (e.isDirectory || path.isEmpty() || SKIP.containsMatchIn(path)) continue
-            val parts = path.split('/')
-            if (parts.any { it == ".." || it == "." }) continue
-            val name = parts.last()
-            if (name.lowercase().endsWith(".zip") && depth < MAX_DEPTH) {
+            if (e.isDirectory) continue
+            val path = Archive.safePath(e.name) ?: continue
+            if (Archive.isZip(path) && depth < MAX_DEPTH) {
                 walk(NoClose(zis), visit, prefix + path.dropLast(4) + "/", depth + 1)
             } else {
                 visit(prefix + path, zis, e.time)

@@ -18,7 +18,7 @@ class TiffException(msg: String) : IOException(msg)
  * Handles 1/8/16-bit, gray/RGB/CMYK/palette, strips or tiles, chunky or planar,
  * and no/LZW/Deflate/PackBits compression with or without the horizontal predictor.
  */
-class TiffReader(private val src: ByteSource) {
+class TiffReader(private val src: ByteSource, image: Boolean = true) {
     private var little = true
     val tags = HashMap<Int, Entry>()
     val exifTags = HashMap<Int, Entry>()
@@ -72,8 +72,9 @@ class TiffReader(private val src: ByteSource) {
         readIfd(u32(h, 4), tags)
         tags[TAG_EXIF_IFD]?.let { runCatching { readIfd(it.long(), exifTags) } }
 
-        width = tags[256]?.int() ?: throw TiffException("no width")
-        height = tags[257]?.int() ?: throw TiffException("no height")
+        // A JPEG's EXIF block is TIFF-shaped but has no image of its own ([image] = false).
+        width = tags[256]?.int() ?: if (image) throw TiffException("no width") else 0
+        height = tags[257]?.int() ?: if (image) throw TiffException("no height") else 0
         spp = tags[277]?.int() ?: 1
         bits = tags[258]?.longs()?.maxOrNull()?.toInt() ?: 1
         photometric = tags[262]?.int() ?: 1

@@ -35,10 +35,6 @@ jobs:
         working-directory: android
         run: ./gradlew --stacktrace :app:testDebugUnitTest :app:lintRelease :app:assembleRelease
 
-      - name: Keep the lint report
+      - name: Show the lint report
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: lint
-          path: android/app/build/reports/lint-results-release.*
-          if-no-files-found: ignore
+        run: cat android/app/build/intermediates/lint_intermediate_text_report/release/lintReportRelease/lint-results-release.txt || true

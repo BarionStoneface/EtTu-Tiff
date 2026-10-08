@@ -265,7 +265,7 @@ object Metadata {
         body.append("</rdf:Bag></dc:subject>")
 
         val xml = buildString {
-            append("<?xpacket begin=\"﻿\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>")
+            append("<?xpacket begin=\"\uFEFF\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>")
             append("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">")
             append("<rdf:Description rdf:about=\"\"")
             NS.forEach { (p, u) -> append(" xmlns:$p=\"$u\"") }
