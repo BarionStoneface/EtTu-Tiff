@@ -13,6 +13,8 @@ const HEAD_BYTES = 64 * 1024;
 
 const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.tif', '.tiff', '.png', '.webp', '.dng', '.heic']);
 const isZip = (name) => path.extname(name).toLowerCase() === '.zip';
+// Junk that zips made on a Mac or Windows carry along; never part of a roll.
+const JUNK = /(^|\/)(__MACOSX\/|\._)|(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini)$/i;
 const isImage = (name) => IMAGE_EXT.has(path.extname(name).toLowerCase());
 
 const EXIF_OPTS = { tiff: true, exif: true, ifd0: true, xmp: true, iptc: false, jfif: false };
@@ -64,6 +66,7 @@ async function scanArchive(zipPath, onProgress = () => {}) {
     await forEachEntry(zip, async (entry) => {
       const name = entry.fileName;
       if (name.endsWith('/')) return; // directory marker; folders come from file paths
+      if (JUNK.test(name)) return;
 
       const { dirs, name: fileName } = splitEntryPath(name);
       if (!fileName) return;

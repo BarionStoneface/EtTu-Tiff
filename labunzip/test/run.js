@@ -110,6 +110,11 @@ function test(name, fn) {
     assert.strictEqual(resolveTimestamp({ DateTimeOriginal: null }, archive).source, 'archive');
   });
 
+  await test("the zip format's zero date (1980-01-01 00:00) is not a scan date", () => {
+    assert.strictEqual(resolveTimestamp(null, new Date(1980, 0, 1, 0, 0, 0)).source, 'none');
+    assert.strictEqual(resolveTimestamp(null, new Date(1980, 0, 1, 9, 30, 0)).source, 'archive');
+  });
+
   await test('with nothing usable at all it reports no date instead of inventing one', () => {
     const r = resolveTimestamp(null, null);
     assert.strictEqual(r.source, 'none');
@@ -174,6 +179,19 @@ function test(name, fn) {
       assert.strictEqual(file.dateSource, 'archive');
       assert.ok(file.date, 'should still get a date');
     }
+  });
+
+  await test('Mac and Windows junk in a zip is not unpacked', async () => {
+    const junky = writeZip(path.join(tmp, 'junky.zip'), [
+      { name: 'Roll/0001.jpg', data: Buffer.from('x'), date: labWriteDate },
+      { name: '__MACOSX/Roll/._0001.jpg', data: Buffer.from('x'), date: labWriteDate },
+      { name: 'Roll/._0001.jpg', data: Buffer.from('x'), date: labWriteDate },
+      { name: 'Roll/.DS_Store', data: Buffer.from('x'), date: labWriteDate },
+      { name: 'Roll/Thumbs.db', data: Buffer.from('x'), date: labWriteDate },
+    ]);
+    const s = await scanArchive(junky);
+    assert.strictEqual(s.fileCount, 1);
+    assert.deepStrictEqual(s.root.folders.map((f) => f.name), ['Roll']);
   });
 
   await test('the extraction date is never used as a timestamp', async () => {

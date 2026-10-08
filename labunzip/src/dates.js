@@ -36,6 +36,10 @@ function usable(value) {
   // Film scans are not from 1970 and not from the 22nd century. A zero or
   // epoch date usually means the field existed but was never filled in.
   if (year < 1980 || year > 2100) return null;
+  // A zip entry with no date is stored as the format's zero, 1980-01-01 00:00
+  // (local time, like every zip date). It is never a real scan date.
+  if (d.getFullYear() === 1980 && d.getMonth() === 0 && d.getDate() === 1
+    && d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() < 2) return null;
   return d;
 }
 
