@@ -60,6 +60,7 @@ data class Frame(
 
 object Metadata {
     private val EXIF_FMT = DateTimeFormatter.ofPattern("yyyy:MM:dd HH:mm:ss")
+    fun exifDate(d: LocalDateTime): String = EXIF_FMT.format(d)
     private val ISO_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss")
 
     fun copyrightNotice(c: Credits, year: Int): String =

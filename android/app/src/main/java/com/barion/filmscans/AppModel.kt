@@ -238,7 +238,7 @@ class AppModel(private val app: Application) {
                 // Check there's room first (with a little to spare).
                 val free = Places.freeBytes(p.dest.uri)
                 if (free != null && free < bytes + bytes / 20 + 50_000_000) {
-                    log += "✗ ${p.zipName}: not enough free space (needs about ${gb(bytes)}, ${gb(free)} free)"
+                    log += "✗ ${p.zipName}: not enough free space (needs about ${sizeText(bytes)}, ${sizeText(free)} free)"
                     continue
                 }
                 val out = Unzip.Outcome()
@@ -249,8 +249,8 @@ class AppModel(private val app: Application) {
                             if (n - lastShown > 4_000_000) {
                                 lastShown = n
                                 progress = ((before + n).toFloat() / total).coerceAtMost(1f)
-                                status = "Unzipping ${p.zipName}: ${gb(n)} of ${gb(bytes)}"
-                                WorkService.update(ctx, "Unzipping ${p.zipName}", "${gb(n)} of ${gb(bytes)}", progress)
+                                status = "Unzipping ${p.zipName}: ${sizeText(n)} of ${sizeText(bytes)}"
+                                WorkService.update(ctx, "Unzipping ${p.zipName}", "${sizeText(n)} of ${sizeText(bytes)}", progress)
                             }
                         }
                     }.also { runCatching { ZipDates.putAll(ctx, out.dates) } }
@@ -287,7 +287,6 @@ class AppModel(private val app: Application) {
         }
     }
 
-    private fun gb(b: Long) = if (b >= 1_000_000_000) "%.1f GB".format(b / 1e9) else "%d MB".format(b / 1_000_000)
 
     private fun depth(r: Roll) = runCatching {
         android.provider.DocumentsContract.getDocumentId(r.folder.uri).count { it == '/' }

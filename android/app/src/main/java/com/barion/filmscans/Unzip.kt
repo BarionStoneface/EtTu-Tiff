@@ -14,6 +14,7 @@ import com.barion.filmscans.core.BytesSource
 import com.barion.filmscans.core.DateFound
 import com.barion.filmscans.core.Dates
 import com.barion.filmscans.core.Listing
+import com.barion.filmscans.core.Metadata
 import com.barion.filmscans.core.Names
 import com.barion.filmscans.core.PlanFolder
 import com.barion.filmscans.core.UnzipPlan
@@ -24,7 +25,6 @@ import java.io.InputStream
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 /**
  * Each unzipped file's date as stored in the zip, kept on the phone by document, so it's still
@@ -90,8 +90,6 @@ class ZipPlan(
     fun close() = runCatching { source?.close() }
 }
 
-fun isJpeg(name: String) = ext(name) in setOf("jpg", "jpeg")
-private fun isImage(name: String) = ext(name) in setOf("jpg", "jpeg", "tif", "tiff")
 
 /** Unzips a download, zips inside it included, following a plan you've checked. */
 object Unzip {
@@ -291,7 +289,6 @@ object Unzip {
 
     private class NoClose(input: InputStream) : java.io.FilterInputStream(input) { override fun close() {} }
 
-    private val EXIF_FMT = DateTimeFormatter.ofPattern("yyyy:MM:dd HH:mm:ss")
 
     /**
      * Writes a date taken into a JPEG that has none. Returns null if nothing was needed or nothing is
@@ -311,7 +308,7 @@ object Unzip {
         return runCatching {
             ctx.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
                 val x = ExifInterface(pfd.fileDescriptor)
-                val s = EXIF_FMT.format(date)
+                val s = Metadata.exifDate(date)
                 x.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, s)
                 if (x.getAttribute(ExifInterface.TAG_DATETIME_DIGITIZED) == null) x.setAttribute(ExifInterface.TAG_DATETIME_DIGITIZED, s)
                 if (x.getAttribute(ExifInterface.TAG_DATETIME) == null) x.setAttribute(ExifInterface.TAG_DATETIME, s)

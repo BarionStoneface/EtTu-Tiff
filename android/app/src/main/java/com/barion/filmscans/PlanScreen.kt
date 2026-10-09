@@ -138,5 +138,3 @@ private fun PlanFooter(p: ZipPlan) {
             color = MaterialTheme.colorScheme.primary)
     }
 }
-
-private fun isImage(name: String) = ext(name) in setOf("jpg", "jpeg", "tif", "tiff")

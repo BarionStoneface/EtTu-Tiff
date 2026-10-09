@@ -37,16 +37,6 @@ import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 
-val TIFF_EXT = setOf("tif", "tiff")
-val JPEG_EXT = setOf("jpg", "jpeg")
-/** Info/sidecar files removed once a roll converts cleanly. */
-val SIDECAR_EXT = setOf("thm", "xmp", "info", "nfo", "xml", "txt", "db", "ini", "ds_store", "md5", "sfv", "log", "dat")
-val THUMB_DIR = Regex("""(?i)^[._]*(thumbs?|thumbnails?|thm|previews?)$""")
-
-fun ext(name: String) = name.substringAfterLast('.', "").lowercase()
-fun stem(name: String) = name.substringBeforeLast('.')
-fun cleanName(s: String) = Names.clean(s)
-
 /** Same rule as the desktop script: "Roll 12 TIFF" -> "Roll 12 JPEG", otherwise add " JPEG". */
 fun jpegFolderName(name: String): String {
     val r = Regex("""(?i)\b(tiffs?|tifs?)\b""").replace(name, "JPEG")
@@ -445,12 +435,7 @@ object Rolls {
             val t = TiffReader(src)
             val th = Thumbs.sample(t, 320)
             var bmp = Bitmap.createBitmap(th.argb, th.width, th.height, Bitmap.Config.ARGB_8888)
-            val m = Matrix()
-            when (t.orientation) {
-                2 -> m.setScale(-1f, 1f); 3 -> m.setRotate(180f); 4 -> m.setScale(1f, -1f)
-                5 -> { m.setRotate(90f); m.postScale(-1f, 1f) }; 6 -> m.setRotate(90f)
-                7 -> { m.setRotate(270f); m.postScale(-1f, 1f) }; 8 -> m.setRotate(270f)
-            }
+            val m = orientationMatrix(t.orientation)
             if (!m.isIdentity) bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
             bmp.asImageBitmap()
         }
