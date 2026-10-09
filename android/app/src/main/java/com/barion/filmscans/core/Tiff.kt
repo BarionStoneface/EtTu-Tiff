@@ -189,9 +189,13 @@ class TiffReader(private val src: ByteSource, image: Boolean = true) {
 
         val oc = outChannels
         // Samples for one band of rows, all planes gathered as chunky whole numbers (0..sampleMax).
-        val bandRows = if (!tiled && compression == 1) minOf(64, height) else chunkH
-        val bandSamples = IntArray(bandRows * width * spp)
-        val out = ByteArray(bandRows * width * oc)
+        // Uncompressed strips are read a band of rows at a time straight from the file, so a scan stored
+        // as one giant strip doesn't have to be loaded whole. A compressed strip has to be decoded whole,
+        // but is then worked through 64 rows at a time, so only one copy of it is ever held.
+        val direct = !tiled && compression == 1
+        val maxBand = if (tiled) chunkH else minOf(64, chunkH, height).coerceAtLeast(1)
+        val bandSamples = IntArray(maxBand * width * spp)
+        val out = ByteArray(maxBand * width * oc)
         // Palette entries are 16-bit; like libtiff, treat a map with nothing over 255 as 8-bit.
         val colorMap = if (photometric == 3) tags[320]?.longs()?.let { m ->
             if (m.all { it <= 255 }) m else LongArray(m.size) { m[it] shr 8 }
@@ -203,12 +207,20 @@ class TiffReader(private val src: ByteSource, image: Boolean = true) {
         // Most scans: plain 8 or 16-bit whole numbers, read directly.
         val plain = !fl && !signed && (sb == 1 || sb == 2)
 
-        // Uncompressed strips are read a band of rows at a time straight from the file,
-        // so a scan stored as one giant strip doesn't have to be loaded whole.
-        val direct = !tiled && compression == 1
-        val bandH = if (direct) minOf(64, height) else chunkH
-        val bands = if (direct) (height + bandH - 1) / bandH else down
+        // Where each band starts. Bands never cross from one strip or tile row into the next.
+        val starts = ArrayList<Int>()
+        run {
+            var y = 0
+            while (y < height) {
+                val chunkEnd = if (direct) height else minOf(height, (y / chunkH + 1) * chunkH)
+                while (y < chunkEnd) { starts += y; y += maxBand }
+                y = chunkEnd
+            }
+        }
         val rowBuf = if (direct) ByteArray(chunkRowBytes) else ByteArray(0)
+        // The last strip or tile decoded for each column of tiles and plane, reused by the next band.
+        val cachedIdx = IntArray(planes * across) { -1 }
+        val cached = arrayOfNulls<ByteArray>(planes * across)
 
         fun sampleAt(data: ByteArray, rowOff: Int, si: Int): Int {
             if (plain) {
@@ -272,14 +284,15 @@ class TiffReader(private val src: ByteSource, image: Boolean = true) {
         // Whole number (0..maxVal) to 8-bit, looked up rather than divided for every sample.
         val lut = IntArray(maxVal + 1) { v -> if (maxVal == 255) v else (v * 255 + maxVal / 2) / maxVal }
 
-        for (dy in 0 until bands) {
-            val rows = minOf(bandH, height - dy * bandH)
+        for (bi in starts.indices) {
+            val y0 = starts[bi]
+            val rows = (if (bi + 1 < starts.size) starts[bi + 1] else height) - y0
             // Thumbnails only need some rows: skip whole bands that hold none of them.
-            if (wantRow != null && (dy * bandH until dy * bandH + rows).none(wantRow)) continue
+            if (wantRow != null && (y0 until y0 + rows).none(wantRow)) continue
             if (direct) {
                 val rps = chunkH
                 for (plane in 0 until planes) for (r in 0 until rows) {
-                    val y = dy * bandH + r
+                    val y = y0 + r
                     if (wantRow != null && !wantRow(y)) continue
                     val idx = plane * down + y / rps
                     if (idx >= offsets.size) throw TiffException("image data is truncated")
@@ -292,12 +305,19 @@ class TiffReader(private val src: ByteSource, image: Boolean = true) {
                 }
             } else for (plane in 0 until planes) {
                 for (ax in 0 until across) {
-                    val idx = plane * perPlane + dy * across + ax
+                    val idx = plane * perPlane + (y0 / chunkH) * across + ax
                     if (idx >= offsets.size) throw TiffException("image data is truncated")
-                    val data = decodeChunk(offsets[idx], counts?.getOrNull(idx), chunkRowBytes, chunkH, sppChunk, chunkW)
+                    val slot = plane * across + ax
+                    if (cachedIdx[slot] != idx) {
+                        cached[slot] = null // let the last one go before decoding the next
+                        cached[slot] = decodeChunk(offsets[idx], counts?.getOrNull(idx), chunkRowBytes, chunkH, sppChunk, chunkW)
+                        cachedIdx[slot] = idx
+                    }
+                    val data = cached[slot]!!
                     val x0 = ax * chunkW
                     val cols = minOf(chunkW, width - x0)
-                    for (r in 0 until rows) unpack(data, r * chunkRowBytes, r, x0, cols, plane)
+                    val first = y0 % chunkH
+                    for (r in 0 until rows) unpack(data, (first + r) * chunkRowBytes, r, x0, cols, plane)
                 }
             }
             // Convert the band to 8-bit gray or RGB.
@@ -325,7 +345,7 @@ class TiffReader(private val src: ByteSource, image: Boolean = true) {
                     }
                 }
             }
-            sink(dy * bandH, rows, out)
+            sink(y0, rows, out)
         }
     }
 
@@ -366,6 +386,23 @@ class TiffReader(private val src: ByteSource, image: Boolean = true) {
         when (predictor) {
             2 -> {
                 val sb = sampleBytes
+                if (sb == 1) { // 8-bit: each byte adds the one a pixel back
+                    for (i in at + stride until at + rowBytes) d[i] = (d[i] + d[i - stride]).toByte()
+                    return
+                }
+                if (sb == 2) { // 16-bit, the usual scan
+                    val step = stride * 2
+                    var p = at + step
+                    val end = at + rowBytes - 1
+                    if (little) while (p < end) {
+                        val v = (d[p].u() or (d[p + 1].u() shl 8)) + (d[p - step].u() or (d[p - step + 1].u() shl 8))
+                        d[p] = v.toByte(); d[p + 1] = (v shr 8).toByte(); p += 2
+                    } else while (p < end) {
+                        val v = ((d[p].u() shl 8) or d[p + 1].u()) + ((d[p - step].u() shl 8) or d[p - step + 1].u())
+                        d[p] = (v shr 8).toByte(); d[p + 1] = v.toByte(); p += 2
+                    }
+                    return
+                }
                 val n = rowBytes / sb
                 for (i in stride until n) {
                     val p = at + i * sb; val q = at + (i - stride) * sb
@@ -463,53 +500,50 @@ class TiffReader(private val src: ByteSource, image: Boolean = true) {
             }
         }
 
+        /**
+         * TIFF LZW (most significant bit first, early change). Every string the decoder knows is a run
+         * of bytes it has already written, so a code is just (where, how long) into the output, and
+         * decoding one is a single copy.
+         */
         fun lzwDecode(input: ByteArray, expected: Int): ByteArray {
-            val out = ByteArrayOutputStream(expected)
-            val prefix = IntArray(4096); val suffix = ByteArray(4096); val length = IntArray(4096)
-            for (i in 0 until 256) { suffix[i] = i.toByte(); length[i] = 1; prefix[i] = -1 }
-            val stack = ByteArray(4096)
-            var next = 258; var width = 9; var old = -1
-            var bitBuf = 0L; var bitCnt = 0; var pos = 0
-            fun emit(code: Int): Byte {
-                var c = code; var sp = 0
-                while (c >= 0) { stack[sp++] = suffix[c]; c = prefix[c] }
-                val first = stack[sp - 1]
-                while (sp > 0) out.write(stack[--sp].toInt())
-                return first
-            }
-            while (true) {
+            val out = ByteArray(expected)
+            val offs = IntArray(4096)
+            val lens = IntArray(4096)
+            var pos = 0
+            var next = 258; var width = 9
+            var old = -1; var oldOff = 0; var oldLen = 0
+            var bitBuf = 0; var bitCnt = 0; var ip = 0
+            while (pos < expected) {
                 while (bitCnt < width) {
-                    if (pos >= input.size) return out.toByteArray()
-                    bitBuf = (bitBuf shl 8) or input[pos++].u().toLong(); bitCnt += 8
+                    if (ip >= input.size) return if (pos == expected) out else out.copyOf(pos)
+                    bitBuf = (bitBuf shl 8) or input[ip++].u(); bitCnt += 8
                 }
-                val code = ((bitBuf shr (bitCnt - width)) and ((1L shl width) - 1)).toInt()
                 bitCnt -= width
+                val code = (bitBuf ushr bitCnt) and ((1 shl width) - 1)
+                bitBuf = bitBuf and ((1 shl bitCnt) - 1)
                 if (code == 257) break
-                if (code == 256) {
-                    next = 258; width = 9; old = -1; continue
-                }
-                if (old == -1) {
-                    if (code > 255) break
-                    emit(code); old = code
-                } else {
-                    val first: Byte
-                    if (code < next) {
-                        first = emit(code)
-                    } else {
-                        // KwKwK case: old string + its own first byte
-                        var c = old; while (prefix[c] >= 0) c = prefix[c]
-                        first = suffix[c]
-                        emit(old); out.write(first.toInt())
+                if (code == 256) { next = 258; width = 9; old = -1; continue }
+                val start = pos
+                when {
+                    code < 256 -> out[pos++] = code.toByte()
+                    old == -1 -> break // a string code before any string: damaged
+                    code < next -> {
+                        val n = minOf(lens[code], expected - pos)
+                        System.arraycopy(out, offs[code], out, pos, n); pos += n
                     }
-                    if (next < 4096) {
-                        prefix[next] = old; suffix[next] = first; length[next] = length[old] + 1; next++
+                    code == next -> { // the string being defined: the previous one plus its own first byte
+                        val n = minOf(oldLen, expected - pos)
+                        System.arraycopy(out, oldOff, out, pos, n); pos += n
+                        if (pos < expected) out[pos++] = out[oldOff]
                     }
-                    old = code
+                    else -> break
                 }
+                // New entry: the previous string plus the first byte of this one, which follows it in the output.
+                if (old != -1 && next < 4096) { offs[next] = oldOff; lens[next] = oldLen + 1; next++ }
+                old = code; oldOff = start; oldLen = pos - start
                 if (next + 1 >= (1 shl width) && width < 12) width++
-                if (out.size() >= expected) break
             }
-            return out.toByteArray()
+            return if (pos == expected) out else out.copyOf(pos)
         }
 
         fun inflate(input: ByteArray, expected: Int): ByteArray {

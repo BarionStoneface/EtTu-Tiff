@@ -149,9 +149,12 @@ object Unzip {
 
     /** Folders made as needed, each listed once so checking for existing files stays quick. */
     private class Writer(val ctx: Context, val base: DocumentFile, val safeWrites: Boolean, val cancelled: () -> Boolean) {
-        class Dir(val doc: DocumentFile) {
-            val kids: HashMap<String, DocumentFile> by lazy {
-                HashMap<String, DocumentFile>().also { m -> doc.listFiles().forEach { k -> k.name?.let { m[it.lowercase()] = k } } }
+        /** What's already in a folder, read once. */
+        class Known(val file: DocumentFile, val isDir: Boolean, val size: Long)
+
+        inner class Dir(val doc: DocumentFile) {
+            val kids: HashMap<String, Known> by lazy {
+                HashMap<String, Known>().also { m -> Docs.list(ctx, doc).forEach { k -> m[k.name.lowercase()] = Known(k.file, k.isDir, k.size) } }
             }
         }
         private val dirs = HashMap<String, Dir>()
@@ -164,9 +167,9 @@ object Unzip {
                 val name = segs.last()
                 val found = parent.kids[name.lowercase()]
                 val doc = when {
-                    found == null -> parent.doc.createDirectory(name)?.also { parent.kids[name.lowercase()] = it }
+                    found == null -> parent.doc.createDirectory(name)?.also { parent.kids[name.lowercase()] = Known(it, true, 0) }
                         ?: error("couldn't create the folder $name")
-                    found.isDirectory -> found
+                    found.isDir -> found.file
                     else -> error("there's already a file called $name where a folder has to go")
                 }
                 Dir(doc)
@@ -183,10 +186,10 @@ object Unzip {
             val key = name.lowercase()
             dir.kids[key]?.let { old ->
                 // Size unknown (a zip read start to finish): whatever is there is kept, never overwritten.
-                if (size == null || size < 0 || old.length() == size) return null
+                if (size == null || size < 0 || old.size == size) return null
                 error("a different $name is already there, so it was left alone")
             }
-            dir.kids.remove("$key.part")?.delete()
+            dir.kids.remove("$key.part")?.file?.delete()
             val tempName = if (safeWrites) "$name.part" else name
             val mime = if (safeWrites) "application/octet-stream" else mimeFor(name)
             val doc = dir.doc.createFile(mime, tempName) ?: error("couldn't create $name")
@@ -206,7 +209,7 @@ object Unzip {
                     val u = DocumentsContract.renameDocument(ctx.contentResolver, doc.uri, name) ?: error("couldn't rename $tempName")
                     DocumentFile.fromSingleUri(ctx, u) ?: error("couldn't rename $tempName")
                 }
-                dir.kids[key] = final
+                dir.kids[key] = Known(final, false, size ?: -1)
                 return final
             } catch (e: Throwable) {
                 runCatching { doc.delete() }
@@ -244,7 +247,7 @@ object Unzip {
                 }
                 if (doc == null) out.already++ else out.written++
                 val usable = Dates.usable(time)
-                val where = doc ?: writer.dir(dirSegs).kids[name.lowercase()]
+                val where = doc ?: writer.dir(dirSegs).kids[name.lowercase()]?.file
                 if (usable != null && where != null) out.dates[where.uri] = usable
             } catch (e: Cancelled) {
                 throw e

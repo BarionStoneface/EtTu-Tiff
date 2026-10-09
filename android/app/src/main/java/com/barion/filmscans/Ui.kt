@@ -353,7 +353,7 @@ private fun ZipCard(m: AppModel) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Zip files here", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
             m.zipsFound.forEach { z ->
-                Text("${z.name} · ${"%.1f".format(z.length() / 1e9)} GB", style = MaterialTheme.typography.bodySmall)
+                Text("${z.doc.name} · ${sizeText(z.doc.size)}", style = MaterialTheme.typography.bodySmall)
             }
             Text("Each is unzipped into a folder next to it; zips inside it are unpacked too. You'll see what's inside first.",
                 style = MaterialTheme.typography.bodySmall)

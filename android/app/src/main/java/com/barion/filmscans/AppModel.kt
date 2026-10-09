@@ -108,7 +108,7 @@ class AppModel(private val app: Application) {
     val outputs = mutableStateListOf<Output>()
 
     /** Zip files found in the picked folder, offered for unzipping in place. */
-    val zipsFound = mutableStateListOf<DocumentFile>()
+    val zipsFound = mutableStateListOf<FoundZip>()
     private var roots: List<DocumentFile> = emptyList()
     private val unzipped = HashSet<String>()
     var progress by mutableFloatStateOf(0f)
@@ -132,12 +132,12 @@ class AppModel(private val app: Application) {
         rolls.clear(); log.clear(); zipsFound.clear()
         workOn = WorkOn.TIFFS
         scope.launch {
-            val zips = mutableListOf<DocumentFile>()
+            val zips = mutableListOf<FoundZip>()
             val found = withContext(Dispatchers.IO) {
                 runCatching { where.flatMap { Rolls.find(ctx, it, zips, deleteInfoFiles) { s -> status = s } } }
             }
             found.onSuccess { rolls.addAll(it) }.onFailure { status = "Couldn't read the folder: ${it.message}" }
-            zipsFound.addAll(zips.filter { it.uri.toString() !in unzipped })
+            zipsFound.addAll(zips.filter { it.doc.uri.toString() !in unzipped })
             loadThumbnails()
             val any = rolls.isNotEmpty() || zipsFound.isNotEmpty()
             phase = if (any) Phase.Ready else Phase.Start
@@ -163,10 +163,7 @@ class AppModel(private val app: Application) {
 
     /** Zips found inside the picked folder: each will unzip next to itself. */
     fun unzipFound() {
-        val jobs = zipsFound.mapNotNull { z ->
-            val parent = z.parentFile ?: return@mapNotNull null
-            Job3(z.uri, z.name ?: "archive.zip", z.length(), parent) { z.delete() }
-        }
+        val jobs = zipsFound.map { z -> Job3(z.doc.uri, z.doc.name, z.doc.size, z.parent) { z.doc.file.delete() } }
         makePlans(jobs)
     }
 
