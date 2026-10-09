@@ -27,6 +27,49 @@ class JpegInfo(
 object JpegRetag {
     private const val SOS = 0xDA
 
+    /**
+     * Where the image ends: just after its EOI marker, found by walking the scans (progressive JPEGs
+     * have several, with tables between them). The end of the file if there's no EOI.
+     */
+    fun imageEnd(src: ByteSource, sos: Long): Long {
+        val two = ByteArray(2)
+        var p = sos
+        while (p + 2 <= src.size) {
+            src.read(p, two)
+            if (two[0] != 0xFF.toByte()) return src.size // lost track: keep the rest, as before
+            val m = two[1].u()
+            when {
+                m == 0xFF -> { p++; continue }
+                m == 0xD9 -> return p + 2
+                m in 0xD0..0xD7 || m == 0x01 -> { p += 2; continue }
+            }
+            if (p + 4 > src.size) return src.size
+            src.read(p + 2, two)
+            p += 2 + ((two[0].u() shl 8) or two[1].u())
+            if (m != SOS) continue
+            // Entropy-coded data: runs until a marker that isn't a stuffed 0xFF00 or a restart marker.
+            val buf = ByteArray(1 shl 16)
+            var found = -1L
+            while (p < src.size && found < 0) {
+                val n = minOf(buf.size.toLong(), src.size - p).toInt()
+                src.read(p, buf, 0, n)
+                var i = 0
+                while (i < n) {
+                    if (buf[i] == 0xFF.toByte()) {
+                        if (i + 1 >= n) break // look again from here with the next byte loaded
+                        val next = buf[i + 1].u()
+                        if (next != 0x00 && next !in 0xD0..0xD7 && next != 0xFF) { found = p + i; break }
+                    }
+                    i++
+                }
+                if (found < 0) { if (n < 2) break; p += if (i >= n - 1 && buf[n - 1] == 0xFF.toByte()) n - 1L else n.toLong() }
+            }
+            if (found < 0) return src.size
+            p = found
+        }
+        return src.size
+    }
+
     fun info(src: ByteSource): JpegInfo {
         var w = 0; var h = 0
         var exif: TiffReader? = null
@@ -120,11 +163,13 @@ object JpegRetag {
         segments.forEach { out.write(it) }
         keepApp.forEach { out.write(it) }
         tables.forEach { out.write(it) }
-        // The image itself, untouched.
+        // The image itself, untouched, up to its end marker. Anything after that (a second picture a
+        // camera or editor tacked on, with its own details and possibly a location) is left behind.
+        val end = imageEnd(src, sos)
         val buf = ByteArray(1 shl 16)
         var q = sos
-        while (q < src.size) {
-            val n = minOf(buf.size.toLong(), src.size - q).toInt()
+        while (q < end) {
+            val n = minOf(buf.size.toLong(), end - q).toInt()
             src.read(q, buf, 0, n)
             out.write(buf, 0, n)
             q += n

@@ -24,6 +24,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicInteger
 
+/** Which kind of roll to work on, when a folder holds both. */
+enum class WorkOn(val label: String) { TIFFS("TIFFs"), JPEGS("Lab JPEGs"), BOTH("Both") }
+
 enum class Phase { Start, Scanning, Planning, Plan, Unzipping, Ready, Converting, Done }
 
 data class Output(val roll: Roll, val count: Int, val firstJpeg: String?, val renamed: Boolean = false,
@@ -87,6 +90,14 @@ class AppModel(private val app: Application) {
     var status by mutableStateOf("")
     var rootName by mutableStateOf("")
     val rolls = mutableStateListOf<Roll>()
+    /** Only matters when the folder holds both TIFF rolls and lab JPEG rolls; starts on TIFFs. */
+    var workOn by mutableStateOf(WorkOn.TIFFS)
+    val mixed get() = rolls.any { it.jpegRoll } && rolls.any { !it.jpegRoll }
+    fun shown(r: Roll) = !mixed || workOn == WorkOn.BOTH || (workOn == WorkOn.JPEGS) == r.jpegRoll
+    /** The rolls on screen: only the kind chosen. Nothing else is touched. */
+    val shownRolls get() = rolls.filter { shown(it) }
+    /** The rolls that will actually be worked on. */
+    val activeRolls get() = shownRolls.filter { it.include }
     val log = mutableStateListOf<String>()
     /** What happened when unzipping, kept on the rolls screen afterwards. */
     val notes = mutableStateListOf<String>()
@@ -119,6 +130,7 @@ class AppModel(private val app: Application) {
         phase = Phase.Scanning
         thumbJob?.cancel()
         rolls.clear(); log.clear(); zipsFound.clear()
+        workOn = WorkOn.TIFFS
         scope.launch {
             val zips = mutableListOf<DocumentFile>()
             val found = withContext(Dispatchers.IO) {
@@ -316,7 +328,7 @@ class AppModel(private val app: Application) {
     @OptIn(ExperimentalCoroutinesApi::class)
     fun convert() {
         val ctx = app
-        val todo = rolls.filter { it.include }
+        val todo = activeRolls
         todo.forEach { r ->
             remember("cameras", cameras, r.camera); remember("lenses", lenses, r.lens); remember("labs", labs, r.lab)
             if (r.film.isNotBlank() && com.barion.filmscans.core.FILM_STOCKS.none { it.name.equals(r.film.trim(), true) })

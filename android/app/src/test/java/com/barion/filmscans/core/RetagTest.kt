@@ -75,6 +75,37 @@ class RetagTest {
         assertArrayEquals(tagged, twice.toByteArray())
     }
 
+    @Test fun nothingAfterTheImageIsKept() {
+        val lab = labJpeg(64, 48)
+        // A second picture tacked on after the end, with its own details and a location.
+        val trailer = byteArrayOf(0xFF.toByte(), 0xD8.toByte()) + "Exif GPSLatitude 51N secret".toByteArray() + byteArrayOf(0xFF.toByte(), 0xD9.toByte())
+        val withTrailer = lab + trailer
+        assertEquals(lab.size.toLong(), JpegRetag.imageEnd(BytesSource(withTrailer), sosOffset(withTrailer).toLong()))
+        val out = ByteArrayOutputStream()
+        JpegRetag.rewrite(BytesSource(withTrailer), emptyList(), out)
+        val tagged = out.toByteArray()
+        assertFalse(String(tagged, Charsets.ISO_8859_1).contains("secret"))
+        assertArrayEquals(lab.copyOfRange(sosOffset(lab), lab.size), tagged.copyOfRange(sosOffset(tagged), tagged.size))
+        // A file cut short (no end marker) keeps everything it has.
+        val cut = lab.copyOf(lab.size - 2)
+        assertEquals(cut.size.toLong(), JpegRetag.imageEnd(BytesSource(cut), sosOffset(cut).toLong()))
+    }
+
+    @Test fun findsTheEndAcrossManyReads() {
+        // Noisy pixels at quality 100 make image data far bigger than one 64 KB read.
+        val w = 400; val h = 300
+        val rnd = java.util.Random(7)
+        val o = ByteArrayOutputStream()
+        val enc = JpegEncoder(o, w, h, 3, 100)
+        enc.writeHeader(emptyList())
+        enc.writeRows(ByteArray(w * 3 * h).also { rnd.nextBytes(it) }, h)
+        enc.finish()
+        val j = o.toByteArray()
+        assertTrue("only ${j.size} bytes", j.size > 300_000)
+        val withTrailer = j + ByteArray(5000) { 0xFF.toByte() } + "tail".toByteArray()
+        assertEquals(j.size.toLong(), JpegRetag.imageEnd(BytesSource(withTrailer), sosOffset(j).toLong()))
+    }
+
     @Test fun notAJpeg() {
         assertTrue(runCatching { JpegRetag.info(BytesSource(ByteArray(100))) }.isFailure)
         assertTrue(runCatching { JpegRetag.rewrite(BytesSource(ByteArray(100)), emptyList(), ByteArrayOutputStream()) }.isFailure)

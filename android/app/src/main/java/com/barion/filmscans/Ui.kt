@@ -170,8 +170,8 @@ fun App(m: AppModel) {
                 }
             }
             if (!settings && m.phase == Phase.Ready && !WindowInsets.isImeVisible) {
-                val n by remember { derivedStateOf { m.rolls.filter { it.include }.sumOf { it.files.size } } }
-                val blocked by remember { derivedStateOf { m.rolls.any { it.include && it.problems(m.keepTiffs).isNotEmpty() } } }
+                val n by remember { derivedStateOf { m.activeRolls.sumOf { it.files.size } } }
+                val blocked by remember { derivedStateOf { m.activeRolls.any { it.problems(m.keepTiffs).isNotEmpty() } } }
                 val replace = !m.keepTiffs
                 Button(
                     onClick = { confirm = true },
@@ -181,7 +181,7 @@ fun App(m: AppModel) {
                     // Above the phone's navigation bar / gesture area, not under it.
                     modifier = Modifier.navigationBarsPadding().fillMaxWidth().padding(16.dp),
                 ) {
-                    Text(if (blocked) "Fix the issues marked in red" else actionLabel(m.rolls.filter { it.include }, replace))
+                    Text(if (blocked) "Fix the issues marked in red" else actionLabel(m.activeRolls, replace))
                 }
             }
         },
@@ -271,7 +271,9 @@ private fun RollList(m: AppModel) {
     val zipItems = (if (m.zipsFound.isNotEmpty()) 1 else 0) + (if (m.notes.isNotEmpty()) 1 else 0)
     val firstRoll = zipItems + 2 // notes and zip cards, mode card, count line
     Column(Modifier.fillMaxSize()) {
-        if (m.rolls.size > 1) RollJumpRow(m.rolls) { i -> scope.launch { list.animateScrollToItem(firstRoll + i) } }
+        val shown = m.shownRolls
+        if (m.mixed) WorkOnRow(m)
+        if (shown.size > 1) RollJumpRow(shown) { i -> scope.launch { list.animateScrollToItem(firstRoll + i) } }
         LazyColumn(
             Modifier.fillMaxWidth().weight(1f),
             state = list,
@@ -283,16 +285,32 @@ private fun RollList(m: AppModel) {
             item { ModeCard(m) }
             item {
                 Text(if (m.rolls.isEmpty()) "No TIFFs here yet. Unzip above to get to the rolls inside."
-                    else "${m.rolls.size} roll(s) in ${m.rootName}. Each roll starts blank — nothing carries over.",
+                    else "${shown.size} roll(s) in ${m.rootName}. Each roll starts blank — nothing carries over." +
+                        if (shown.size < m.rolls.size) " ${m.rolls.size - shown.size} other roll(s) aren't shown and won't be touched." else "",
                     style = MaterialTheme.typography.bodySmall)
             }
-            itemsIndexed(m.rolls, key = { _, r -> r.folder.uri.toString() }) { i, r ->
-                val next = if (i < m.rolls.lastIndex) ({ scope.launch { list.animateScrollToItem(firstRoll + i + 1) }; Unit }) else null
+            itemsIndexed(shown, key = { _, r -> r.folder.uri.toString() }) { i, r ->
+                val next = if (i < shown.lastIndex) ({ scope.launch { list.animateScrollToItem(firstRoll + i + 1) }; Unit }) else null
                 RollCard(m, r, next) { f -> preview = f }
             }
         }
     }
     preview?.let { PreviewDialog(it) { preview = null } }
+}
+
+/** This folder holds both TIFF rolls and lab JPEG rolls: choose which to work on. Only those are touched. */
+@Composable
+private fun WorkOnRow(m: AppModel) {
+    val tiffs = m.rolls.count { !it.jpegRoll }
+    val jpegs = m.rolls.count { it.jpegRoll }
+    Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+        Text("This folder has $tiffs TIFF roll(s) and $jpegs lab JPEG roll(s). Work on:", style = MaterialTheme.typography.bodySmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            WorkOn.entries.forEach { w ->
+                FilterChip(selected = m.workOn == w, onClick = { m.workOn = w }, label = { Text(w.label) })
+            }
+        }
+    }
 }
 
 /** Jump straight to any roll. */
@@ -372,8 +390,8 @@ private fun actionLabel(rolls: List<Roll>, replace: Boolean): String {
 @Composable
 private fun ModeCard(m: AppModel) {
     val replace = !m.keepTiffs
-    val hasJpegs = m.rolls.any { it.jpegRoll }
-    val hasTiffs = m.rolls.any { !it.jpegRoll }
+    val hasJpegs = m.shownRolls.any { it.jpegRoll }
+    val hasTiffs = m.shownRolls.any { !it.jpegRoll }
     Card(
         Modifier.fillMaxWidth(),
         colors = if (replace) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer,
@@ -419,7 +437,7 @@ private fun RollCard(m: AppModel, r: Roll, onNext: (() -> Unit)?, onPreview: (Sc
             if (!r.include) return@Column
             ThumbStrip(r, onPreview)
             RollFacts(r)
-            if (m.rolls.size > 1) CopyDetails(r, m.rolls)
+            if (m.shownRolls.size > 1) CopyDetails(r, m.shownRolls)
             MetaFields(r, m.cameras, m.lenses, m.labs, m.customFilms)
             TagChips(r)
             DateOverride(r)
@@ -665,7 +683,7 @@ private fun RollProblems(r: Roll, keepTiffs: Boolean) {
 
 @Composable
 private fun ConfirmDialog(m: AppModel, onDismiss: () -> Unit, onGo: () -> Unit) {
-    val rolls = m.rolls.filter { it.include }
+    val rolls = m.activeRolls
     val n = rolls.sumOf { it.files.size }
     val replace = !m.keepTiffs
     val side = if (replace) rolls.filter { it.deleteSidecars }.sumOf { it.sidecars.size } else 0
