@@ -18,14 +18,20 @@ class TiffTypesTest {
     }
 
     /** Decodes JPEG-compressed TIFF parts on the JVM the way the phone's decoder does on Android. */
+    // Through reflection: unit tests compile against Android's classes, which have no ImageIO,
+    // but they run on a desktop Java that does.
     private val jvmJpeg = TiffReader.JpegDecoder { jpeg ->
-        val img = javax.imageio.ImageIO.read(java.io.ByteArrayInputStream(jpeg)) ?: return@JpegDecoder null
-        val px = ByteArray(img.width * img.height * 3)
-        for (y in 0 until img.height) for (x in 0 until img.width) {
-            val c = img.getRGB(x, y); val i = (y * img.width + x) * 3
+        val img = Class.forName("javax.imageio.ImageIO").getMethod("read", java.io.InputStream::class.java)
+            .invoke(null, java.io.ByteArrayInputStream(jpeg)) ?: return@JpegDecoder null
+        val w = img.javaClass.getMethod("getWidth").invoke(img) as Int
+        val h = img.javaClass.getMethod("getHeight").invoke(img) as Int
+        val getRgb = img.javaClass.getMethod("getRGB", Int::class.java, Int::class.java)
+        val px = ByteArray(w * h * 3)
+        for (y in 0 until h) for (x in 0 until w) {
+            val c = getRgb.invoke(img, x, y) as Int; val i = (y * w + x) * 3
             px[i] = (c shr 16).toByte(); px[i + 1] = (c shr 8).toByte(); px[i + 2] = c.toByte()
         }
-        TiffReader.Decoded(img.width, img.height, 3, px)
+        TiffReader.Decoded(w, h, 3, px)
     }
 
     private fun check(name: String, tolerance: Int = 0) {
