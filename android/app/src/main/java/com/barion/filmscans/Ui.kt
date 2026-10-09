@@ -104,6 +104,7 @@ fun App(m: AppModel) {
     var settings by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf(false) }
     var leave by remember { mutableStateOf(false) }
+    var dryRun by remember { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) m.open(uri)
     }
@@ -145,8 +146,10 @@ fun App(m: AppModel) {
                 },
                 actions = {
                     if (settings) TextButton(onClick = { m.saveSettings(); settings = false }) { Text("Done") }
-                    else if (m.phase != Phase.Converting && m.phase != Phase.Unzipping && m.phase != Phase.Planning)
+                    else if (m.phase != Phase.Converting && m.phase != Phase.Unzipping && m.phase != Phase.Planning) {
+                        if (m.phase == Phase.Ready && m.activeRolls.isNotEmpty()) TextButton(onClick = { dryRun = true }) { Text("Dry run") }
                         TextButton(onClick = { settings = true }) { Text("Settings") }
+                    }
                 },
             )
         },
@@ -206,6 +209,7 @@ fun App(m: AppModel) {
     }
 
     if (confirm) ConfirmDialog(m, onDismiss = { confirm = false }) { confirm = false; m.convert() }
+    if (dryRun) DryRunDialog(m) { dryRun = false }
     if (leave) AlertDialog(
         onDismissRequest = { leave = false },
         title = { Text("Leave these rolls?") },
@@ -679,6 +683,79 @@ private fun RollProblems(r: Roll, keepTiffs: Boolean) {
             style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 12.dp))
     }
     r.problems(keepTiffs).forEach { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+}
+
+/** One line of a dry run; problems are shown in red. */
+private class DryLine(val text: String, val problem: Boolean = false, val heading: Boolean = false)
+
+/**
+ * Exactly what pressing the button would do, file by file, worked out the same way the real run
+ * does it. Nothing is written, deleted or renamed.
+ */
+private fun dryRunLines(m: AppModel): List<DryLine> {
+    val keep = m.keepTiffs
+    val out = mutableListOf(DryLine("Nothing has been changed. This is what would happen:"))
+    for (r in m.activeRolls) {
+        out += DryLine(r.name, heading = true)
+        val where = when {
+            r.jpegRoll && keep -> "into a new folder, ${cleanName(r.copiesFolder)}"
+            !keep && r.renameFolder && cleanName(r.newFolderName) != r.name -> "here; the folder becomes ${cleanName(r.newFolderName)}"
+            else -> "here"
+        }
+        out += DryLine(when {
+            r.jpegRoll && keep -> "${r.files.size} lab JPEG(s) copied and tagged $where. The originals stay as they are."
+            r.jpegRoll -> "${r.files.size} lab JPEG(s) tagged in place, $where. Pictures not re-saved; old details replaced."
+            keep -> "${r.files.size} TIFF(s) converted to JPEG $where. The TIFFs stay."
+            else -> "${r.files.size} TIFF(s) converted to JPEG $where. Each TIFF is deleted once its JPEG is saved and checked."
+        })
+        for (f in r.files) {
+            val date = when {
+                f.date.embedded -> "${MINUTE.format(f.date.date)} (${plainSource(f.date.source)})"
+                r.overrideDate() != null -> "${MINUTE.format(r.overrideDate())} (typed in)"
+                r.useFileDates -> "${MINUTE.format(f.date.date)} (file date on the phone)"
+                else -> null
+            }
+            out += DryLine("${f.name} → ${f.newName}.jpg · " + (date?.let { "scanned $it" } ?: "no scan date chosen"),
+                problem = date == null || f.error != null)
+            f.error?.let { out += DryLine("   can't be read: $it", problem = true) }
+        }
+        val replacing = r.replacing(keep)
+        if (replacing.isNotEmpty()) out += DryLine((if (r.overwrite) "Replaces " else "Would need to replace ") +
+            "JPEG(s) already there: ${replacing.joinToString()}", problem = !r.overwrite)
+        if (!keep && r.deleteSidecars && r.sidecars.isNotEmpty())
+            out += DryLine("Also deletes ${r.sidecars.size} info file(s): " + r.sidecars.joinToString { it.name ?: "?" })
+        else if (r.sidecars.isNotEmpty()) out += DryLine("Info files kept: " + r.sidecars.joinToString { it.name ?: "?" })
+        r.problems(keep).forEach { out += DryLine("Blocks the run: $it", problem = true) }
+    }
+    val c = m.credits()
+    out += DryLine("Every photo", heading = true)
+    out += DryLine(if (c.author.isBlank()) "No name set, so no copyright is written." else
+        Metadata.copyrightNotice(c, LocalDate.now().year).replace(LocalDate.now().year.toString(), "<scan year>"),
+        problem = c.author.isBlank())
+    out += DryLine("Location and every other detail in the originals are dropped; the scanner, the original file name, the colour profile and the resolution are kept.")
+    return out
+}
+
+@Composable
+private fun DryRunDialog(m: AppModel, onClose: () -> Unit) {
+    val lines = remember { dryRunLines(m) }
+    val problems = lines.count { it.problem }
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text(if (problems == 0) "Dry run: ready to go" else "Dry run: $problems thing(s) to fix") },
+        text = {
+            LazyColumn(Modifier.heightIn(max = 520.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                items(lines) { l ->
+                    Text(l.text,
+                        style = if (l.heading) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodySmall,
+                        fontWeight = if (l.heading) FontWeight.SemiBold else null,
+                        color = if (l.problem) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                        modifier = if (l.heading) Modifier.padding(top = 8.dp) else Modifier)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onClose) { Text("Close") } },
+    )
 }
 
 @Composable

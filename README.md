@@ -66,6 +66,14 @@ no.
   Their old details, location included, are replaced; the colour profile is
   kept. Keeping the originals puts tagged copies in a new folder beside the
   roll; replacing them tags them in place.
+- **Reads the TIFFs scanners and editors write.** 1 to 16-bit (including
+  packed 2, 4 and 12-bit), 32-bit and floating-point (16, 32 and 64-bit),
+  BigTIFF over 4 GB, strips or tiles, and no compression, LZW, Deflate,
+  PackBits or JPEG. Each kind is checked against tifffile, the library the
+  desktop script used.
+- **Dry run.** Lists exactly what would happen to every file (its new name,
+  its scan date and where that came from, what gets deleted, renamed or
+  replaced) without changing anything.
 - **Previews the roll first.** Thumbnails are read straight from the TIFFs
   before anything is converted.
 - **Keeps the lab's file names.** Text is added before or after the lab's name,
