@@ -30,7 +30,7 @@ enum class WorkOn(val label: String) { TIFFS("TIFFs"), JPEGS("Lab JPEGs"), BOTH(
 enum class Phase { Start, Scanning, Planning, Plan, Unzipping, Ready, Converting, Done }
 
 data class Output(val roll: Roll, val count: Int, val firstJpeg: String?, val renamed: Boolean = false,
-                  val media: android.net.Uri? = null) {
+                  val media: Uri? = null) {
     val folderName get() = if (renamed) roll.newFolderName else roll.name
 }
 
@@ -124,7 +124,6 @@ class AppModel(private val app: Application) {
     }
 
     private fun scan(where: List<DocumentFile>, label: String) {
-        val ctx = app
         roots = where
         rootName = label
         phase = Phase.Scanning
@@ -134,7 +133,7 @@ class AppModel(private val app: Application) {
         scope.launch {
             val zips = mutableListOf<FoundZip>()
             val found = withContext(Dispatchers.IO) {
-                runCatching { where.flatMap { Rolls.find(ctx, it, zips, deleteInfoFiles) { s -> status = s } } }
+                runCatching { where.flatMap { Rolls.find(app, it, zips, deleteInfoFiles) { s -> status = s } } }
             }
             found.onSuccess { rolls.addAll(it) }.onFailure { status = "Couldn't read the folder: ${it.message}" }
             zipsFound.addAll(zips.filter { it.doc.uri.toString() !in unzipped })
@@ -154,25 +153,23 @@ class AppModel(private val app: Application) {
 
     /** Zips picked from Downloads: each will unzip into its own folder inside [destTree]. */
     fun unzipDownloads(destTree: Uri) {
-        val ctx = app
-        val dest = DocumentFile.fromTreeUri(ctx, destTree) ?: return
-        val picked = pendingZips.mapNotNull { u -> DocumentFile.fromSingleUri(ctx, u)?.let { Triple(u, it.name ?: "download.zip", it) } }
+        val dest = DocumentFile.fromTreeUri(app, destTree) ?: return
+        val picked = pendingZips.mapNotNull { u -> DocumentFile.fromSingleUri(app, u)?.let { Triple(u, it.name ?: "download.zip", it) } }
         pendingZips = emptyList()
-        makePlans(picked.map { (u, name, doc) -> Job3(u, name, doc.length(), dest) { doc.delete() } })
+        makePlans(picked.map { (u, name, doc) -> ZipJob(u, name, doc.length(), dest) { doc.delete() } })
     }
 
     /** Zips found inside the picked folder: each will unzip next to itself. */
     fun unzipFound() {
-        val jobs = zipsFound.map { z -> Job3(z.doc.uri, z.doc.name, z.doc.size, z.parent) { z.doc.file.delete() } }
+        val jobs = zipsFound.map { z -> ZipJob(z.doc.uri, z.doc.name, z.doc.size, z.parent) { z.doc.file.delete() } }
         makePlans(jobs)
     }
 
-    private class Job3(val uri: Uri, val name: String, val size: Long, val dest: DocumentFile, val delete: () -> Boolean)
+    private class ZipJob(val uri: Uri, val name: String, val size: Long, val dest: DocumentFile, val delete: () -> Boolean)
 
     /** Reads each zip's contents and dates, and shows the plan. Nothing is written yet. */
-    private fun makePlans(jobs: List<Job3>) {
+    private fun makePlans(jobs: List<ZipJob>) {
         if (jobs.isEmpty()) return
-        val ctx = app
         thumbJob?.cancel()
         closePlans()
         beforePlan = if (phase == Phase.Ready) Phase.Ready else Phase.Start
@@ -182,7 +179,7 @@ class AppModel(private val app: Application) {
             for (j in jobs) {
                 status = "Reading ${j.name}…"
                 withContext(Dispatchers.IO) {
-                    runCatching { Unzip.plan(ctx, j.uri, j.name, j.size, j.dest, j.delete) { s -> status = "${j.name}: $s" } }
+                    runCatching { Unzip.plan(app, j.uri, j.name, j.size, j.dest, j.delete) { s -> status = "${j.name}: $s" } }
                 }.onSuccess { plans += it }.onFailure { log += "✗ ${it.message ?: j.name}" }
             }
             status = ""
@@ -221,14 +218,13 @@ class AppModel(private val app: Application) {
 
     fun startUnzip() {
         if (plans.isEmpty()) return
-        val ctx = app
         saveSettings()
         val todo = plans.toList()
         val datesForJpegs = labJpegDates
         stop = false
         phase = Phase.Unzipping
         log.clear()
-        WorkService.start(ctx, "Unzipping")
+        WorkService.start(app, "Unzipping")
         scope.launch {
             val total = todo.sumOf { (it.build()?.bytes ?: it.zipSize).coerceAtLeast(1) }
             var before = 0L
@@ -245,15 +241,15 @@ class AppModel(private val app: Application) {
                 var lastShown = 0L
                 val ok = withContext(Dispatchers.IO) {
                     runCatching {
-                        Unzip.run(ctx, p, datesForJpegs, out, { stop }) { n ->
+                        Unzip.run(app, p, datesForJpegs, out, { stop }) { n ->
                             if (n - lastShown > 4_000_000) {
                                 lastShown = n
                                 progress = ((before + n).toFloat() / total).coerceAtMost(1f)
                                 status = "Unzipping ${p.zipName}: ${sizeText(n)} of ${sizeText(bytes)}"
-                                WorkService.update(ctx, "Unzipping ${p.zipName}", "${sizeText(n)} of ${sizeText(bytes)}", progress)
+                                WorkService.update(app, "Unzipping ${p.zipName}", "${sizeText(n)} of ${sizeText(bytes)}", progress)
                             }
                         }
-                    }.also { runCatching { ZipDates.putAll(ctx, out.dates) } }
+                    }.also { runCatching { ZipDates.putAll(app, out.dates) } }
                 }
                 before += bytes
                 tops += out.tops
@@ -277,7 +273,7 @@ class AppModel(private val app: Application) {
                 if (stop) break
             }
             closePlans()
-            WorkService.finish(ctx, if (stop) "Unzipping stopped" else "Unzipped",
+            WorkService.finish(app, if (stop) "Unzipping stopped" else "Unzipped",
                 log.count { it.startsWith("✓") }.let { "$it zip(s) unzipped" } +
                     log.count { it.startsWith("✗") }.let { if (it > 0) ", $it problem(s)" else "" })
             notes.clear(); notes.addAll(log)
@@ -299,7 +295,6 @@ class AppModel(private val app: Application) {
      * and pause while the keyboard is up so they never compete with typing.
      */
     private fun loadThumbnails() {
-        val ctx = app
         thumbJob?.cancel()
         thumbJob = scope.launch(Dispatchers.IO) {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
@@ -307,7 +302,7 @@ class AppModel(private val app: Application) {
                 for (roll in rolls.toList()) for (f in roll.files) {
                     if (f.error != null || f.thumb != null) continue
                     while (typing) delay(250)
-                    f.thumb = Rolls.thumbnail(ctx, f)
+                    f.thumb = Rolls.thumbnail(app, f)
                 }
             } finally {
                 android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DEFAULT)
@@ -323,7 +318,6 @@ class AppModel(private val app: Application) {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     fun convert() {
-        val ctx = app
         val todo = activeRolls
         todo.forEach { r ->
             remember("cameras", cameras, r.camera); remember("lenses", lenses, r.lens); remember("labs", labs, r.lab)
@@ -340,7 +334,7 @@ class AppModel(private val app: Application) {
         outputs.clear()
         stop = false
         phase = Phase.Converting
-        WorkService.start(ctx, "Converting")
+        WorkService.start(app, "Converting")
         // A few files at once: memory stays small because rows are streamed.
         val workers = Dispatchers.Default.limitedParallelism(minOf(3, Runtime.getRuntime().availableProcessors()))
         scope.launch {
@@ -354,7 +348,7 @@ class AppModel(private val app: Application) {
                         // Stopped: files not yet started are left exactly as they are.
                         if (stop) { failed.incrementAndGet(); withContext(Dispatchers.Main) { done++ }; return@async }
                         try {
-                            Rolls.convertOne(ctx, roll, f, i, meta, credits, quality, keep) { p -> if (i % 3 == 0) fileProgress = p }
+                            Rolls.convertOne(app, roll, f, i, meta, credits, quality, keep) { p -> if (i % 3 == 0) fileProgress = p }
                             f.done = true
                             withContext(Dispatchers.Main) { log += "✓ ${roll.name}/${f.name} → ${f.newName}.jpg" }
                         } catch (t: Throwable) {
@@ -363,7 +357,7 @@ class AppModel(private val app: Application) {
                         } finally {
                             withContext(Dispatchers.Main) {
                                 done++
-                                WorkService.update(ctx, "Converting ${roll.name}", "$done of $total", done.toFloat() / total)
+                                WorkService.update(app, "Converting ${roll.name}", "$done of $total", done.toFloat() / total)
                             }
                         }
                     }
@@ -384,7 +378,7 @@ class AppModel(private val app: Application) {
             }
             // Deepest folders first, so renaming a parent doesn't break its children's links.
             for (roll in renames.sortedByDescending { depth(it) }) {
-                val err = withContext(Dispatchers.IO) { Rolls.renameFolder(ctx, roll) }
+                val err = withContext(Dispatchers.IO) { Rolls.renameFolder(app, roll) }
                 log += if (err == null) "${roll.name} → ${roll.newFolderName}" else "${roll.name}: $err"
                 if (err == null) for (i in outputs.indices) if (outputs[i].roll === roll) outputs[i] = outputs[i].copy(renamed = true)
             }
@@ -393,13 +387,13 @@ class AppModel(private val app: Application) {
             for (i in outputs.indices) {
                 val o = outputs[i]
                 val names = o.roll.files.filter { it.done }.map { it.newName + ".jpg" }
-                val media = withContext(Dispatchers.IO) { Places.scan(ctx, o.roll.outputUri ?: o.roll.folder.uri, names) }
+                val media = withContext(Dispatchers.IO) { Places.scan(app, o.roll.outputUri ?: o.roll.folder.uri, names) }
                 outputs[i] = o.copy(media = media)
             }
             if (stop) log += "Stopped. Scans not converted yet were left untouched."
             status = ""
             phase = Phase.Done
-            WorkService.finish(ctx, if (stop) "Converting stopped" else "Converted",
+            WorkService.finish(app, if (stop) "Converting stopped" else "Converted",
                 "${outputs.sumOf { it.count }} JPEG(s) saved" + log.count { it.startsWith("✗") }.let { if (it > 0) ", $it didn't convert" else "" })
         }
     }
