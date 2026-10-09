@@ -58,7 +58,7 @@ private class DryLine(val text: String, val problem: Boolean = false, val headin
  * does it. Nothing is written, deleted or renamed.
  */
 private fun dryRunLines(m: AppModel): List<DryLine> {
-    val keep = m.keepTiffs
+    val keep = m.settings.keepTiffs
     val out = mutableListOf(DryLine("Nothing has been changed. This is what would happen:"))
     for (r in m.activeRolls) {
         out += DryLine(r.name, heading = true)
@@ -92,7 +92,7 @@ private fun dryRunLines(m: AppModel): List<DryLine> {
         else if (r.sidecars.isNotEmpty()) out += DryLine("Info files kept: " + r.sidecars.joinToString { it.name ?: "?" })
         r.problems(keep).forEach { out += DryLine("Blocks the run: $it", problem = true) }
     }
-    val c = m.credits()
+    val c = m.settings.credits()
     out += DryLine("Every photo", heading = true)
     out += DryLine(if (c.author.isBlank()) "No name set, so no copyright is written." else
         Metadata.copyrightNotice(c, LocalDate.now().year).replace(LocalDate.now().year.toString(), "<scan year>"),
@@ -127,9 +127,9 @@ internal fun DryRunDialog(m: AppModel, onClose: () -> Unit) {
 internal fun ConfirmDialog(m: AppModel, onDismiss: () -> Unit, onGo: () -> Unit) {
     val rolls = m.activeRolls
     val n = rolls.sumOf { it.files.size }
-    val replace = !m.keepTiffs
+    val replace = !m.settings.keepTiffs
     val side = if (replace) rolls.filter { it.deleteSidecars }.sumOf { it.sidecars.size } else 0
-    val overwrites = rolls.filter { it.overwrite }.sumOf { it.replacing(m.keepTiffs).size }
+    val overwrites = rolls.filter { it.overwrite }.sumOf { it.replacing(m.settings.keepTiffs).size }
     val tiffs = rolls.filter { !it.jpegRoll }.sumOf { it.files.size }
     val jpegs = rolls.filter { it.jpegRoll }.sumOf { it.files.size }
     val renames = if (replace) rolls.filter { it.renameFolder && cleanName(it.newFolderName) != it.name } else emptyList()
@@ -158,9 +158,9 @@ internal fun ConfirmDialog(m: AppModel, onDismiss: () -> Unit, onGo: () -> Unit)
                 }
                 if (overwrites > 0) Text("$overwrites JPEG(s) already in the folders will be replaced.")
                 if (noFilm > 0) Text("$noFilm roll(s) have no film stock set.", color = MaterialTheme.colorScheme.primary)
-                if (m.author.isBlank()) Text("No name set in Settings, so no copyright will be written.",
+                if (m.settings.author.isBlank()) Text("No name set in Settings, so no copyright will be written.",
                     color = MaterialTheme.colorScheme.error)
-                else Text(Metadata.copyrightNotice(m.credits(), LocalDate.now().year).replace(LocalDate.now().year.toString(), "<scan year>"),
+                else Text(Metadata.copyrightNotice(m.settings.credits(), LocalDate.now().year).replace(LocalDate.now().year.toString(), "<scan year>"),
                     style = MaterialTheme.typography.bodySmall)
             }
         },

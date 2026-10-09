@@ -38,10 +38,10 @@ internal fun DeleteZipsSwitch(m: AppModel) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("Delete the zip after unzipping")
-            if (m.deleteZips) Text("The zip is permanently deleted once everything in it is out.",
+            if (m.settings.deleteZips) Text("The zip is permanently deleted once everything in it is out.",
                 color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         }
-        Switch(m.deleteZips, { m.deleteZips = it; m.saveSettings() })
+        Switch(m.settings.deleteZips, { m.settings.deleteZips = it; m.settings.save() })
     }
 }
 

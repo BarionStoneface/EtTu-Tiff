@@ -33,7 +33,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            val theme = model.theme
+            val theme = model.settings.theme
             // Status bar icons follow the app's theme, not the phone's dark mode.
             LaunchedEffect(theme) {
                 val bars = if (theme.dark) SystemBarStyle.dark(Color.TRANSPARENT)

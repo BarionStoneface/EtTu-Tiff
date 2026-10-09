@@ -60,14 +60,14 @@ internal fun RollCard(m: AppModel, r: Roll, onNext: (() -> Unit)?, onPreview: (S
             ThumbStrip(r, onPreview)
             RollFacts(r)
             if (m.shownRolls.size > 1) CopyDetails(r, m.shownRolls)
-            MetaFields(r, m.cameras, m.lenses, m.labs, m.customFilms)
+            MetaFields(r, m.settings.cameras, m.settings.lenses, m.settings.labs, m.settings.customFilms)
             TagChips(r)
             DateOverride(r)
             HorizontalDivider()
             NamesSection(r, onPreview)
             HorizontalDivider()
-            FolderSection(r, m.keepTiffs)
-            RollProblems(r, m.keepTiffs)
+            FolderSection(r, m.settings.keepTiffs)
+            RollProblems(r, m.settings.keepTiffs)
             if (onNext != null) TextButton(onClick = onNext, modifier = Modifier.align(Alignment.End)) { Text("Next roll ↓") }
         }
     }

@@ -56,8 +56,8 @@ fun PlanScreen(m: AppModel) {
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (m.plans.any { it.hasJpegs() }) SettingSwitch("Date the lab's JPEGs", m.labJpegDates,
-                        { m.labJpegDates = it; m.saveSettings() },
+                    if (m.plans.any { it.hasJpegs() }) SettingSwitch("Date the lab's JPEGs", m.settings.labJpegDates,
+                        { m.settings.labJpegDates = it; m.settings.save() },
                         "JPEGs with no date taken get their scan date, so galleries sort them by when they were scanned.")
                     DeleteZipsSwitch(m)
                 }

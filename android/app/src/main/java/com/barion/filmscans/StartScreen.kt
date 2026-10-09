@@ -28,7 +28,7 @@ internal fun StartScreen(m: AppModel, pick: () -> Unit, unzip: () -> Unit) {
         Text("Keeps the pixels, colour profile, DPI, scanner and original scan date. Drops location and " +
             "everything else, then adds your camera, film, push/pull and copyright. JPEGs are saved in the " +
             "same folder as their TIFFs; you choose whether the TIFFs are replaced or kept.", style = MaterialTheme.typography.bodyMedium)
-        if (m.author.isBlank()) Text("Add your name in Settings first, so the copyright gets written.",
+        if (m.settings.author.isBlank()) Text("Add your name in Settings first, so the copyright gets written.",
             color = MaterialTheme.colorScheme.primary)
         Button(onClick = pick, modifier = Modifier.fillMaxWidth()) { Text("Choose scans folder") }
         Text("Pick a folder holding one roll, or a folder of roll folders. Zips in it can be unzipped from there.",

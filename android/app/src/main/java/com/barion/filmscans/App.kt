@@ -64,7 +64,7 @@ fun App(m: AppModel) {
 
     val goBack: () -> Unit = {
         when {
-            settings -> { m.saveSettings(); settings = false }
+            settings -> { m.settings.save(); settings = false }
             m.phase == Phase.Ready -> leave = true
             m.phase == Phase.Plan -> m.leavePlan()
             m.phase == Phase.Done -> m.reset()
@@ -88,7 +88,7 @@ fun App(m: AppModel) {
                         IconButton(onClick = goBack) { Text("←", style = MaterialTheme.typography.titleLarge) }
                 },
                 actions = {
-                    if (settings) TextButton(onClick = { m.saveSettings(); settings = false }) { Text("Done") }
+                    if (settings) TextButton(onClick = { m.settings.save(); settings = false }) { Text("Done") }
                     else if (m.phase != Phase.Converting && m.phase != Phase.Unzipping && m.phase != Phase.Planning) {
                         if (m.phase == Phase.Ready && m.activeRolls.isNotEmpty()) TextButton(onClick = { dryRun = true }) { Text("Dry run") }
                         TextButton(onClick = { settings = true }) { Text("Settings") }
@@ -117,8 +117,8 @@ fun App(m: AppModel) {
             }
             if (!settings && m.phase == Phase.Ready && !WindowInsets.isImeVisible) {
                 val n by remember { derivedStateOf { m.activeRolls.sumOf { it.files.size } } }
-                val blocked by remember { derivedStateOf { m.activeRolls.any { it.problems(m.keepTiffs).isNotEmpty() } } }
-                val replace = !m.keepTiffs
+                val blocked by remember { derivedStateOf { m.activeRolls.any { it.problems(m.settings.keepTiffs).isNotEmpty() } } }
+                val replace = !m.settings.keepTiffs
                 Button(
                     onClick = { confirm = true },
                     enabled = n > 0 && !blocked,

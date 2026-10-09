@@ -1,7 +1,6 @@
 package com.barion.filmscans
 
 import android.app.Application
-import android.content.Context
 import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -10,8 +9,6 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.documentfile.provider.DocumentFile
-import com.barion.filmscans.core.Credits
-import com.barion.filmscans.core.License
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CoroutineScope
@@ -41,49 +38,9 @@ data class Output(val roll: Roll, val count: Int, val firstJpeg: String?, val re
  */
 class AppModel(private val app: Application) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val prefs = app.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
-    // ---- settings, kept between runs
-    var author by mutableStateOf(prefs.getString("author", "") ?: "")
-    var license by mutableStateOf(runCatching { License.valueOf(prefs.getString("license", "")!!) }.getOrDefault(License.ALL_RIGHTS))
-    var contact by mutableStateOf(prefs.getString("contact", "") ?: "")
-    var quality by mutableIntStateOf(prefs.getInt("quality", 100))
-    /** Keep the TIFFs and add JPEGs beside them, instead of replacing them. */
-    var keepTiffs by mutableStateOf(prefs.getBoolean("keepTiffs", true))
-    /** Delete a zip once everything in it is unzipped. Off unless chosen. */
-    var deleteZips by mutableStateOf(prefs.getBoolean("deleteZips", false))
-    /** Starting point for each roll's "delete info files" switch. Off unless chosen. */
-    var deleteInfoFiles by mutableStateOf(prefs.getBoolean("deleteInfoFiles", false))
-    /** Give the lab's JPEGs a date taken when unzipping, so galleries sort them by scan date. */
-    var labJpegDates by mutableStateOf(prefs.getBoolean("labJpegDates", true))
-    var theme by mutableStateOf(runCatching { AppTheme.valueOf(prefs.getString("theme", "")!!) }.getOrDefault(AppTheme.STUDIO))
-
-    /** Past answers, offered in the dropdowns. Never filled in automatically. */
-    val cameras = mutableStateListOf<String>().apply { addAll(history("cameras")) }
-    val lenses = mutableStateListOf<String>().apply { addAll(history("lenses")) }
-    val labs = mutableStateListOf<String>().apply { addAll(history("labs")) }
-    val customFilms = mutableStateListOf<String>().apply { addAll(history("films")) }
-
-    fun saveSettings() {
-        prefs.edit().putString("author", author.trim()).putString("license", license.name)
-            .putString("contact", contact.trim()).putInt("quality", quality)
-            .putBoolean("keepTiffs", keepTiffs).putString("theme", theme.name)
-            .putBoolean("deleteZips", deleteZips).putBoolean("deleteInfoFiles", deleteInfoFiles)
-            .putBoolean("labJpegDates", labJpegDates).apply()
-    }
-
-    private fun history(key: String): List<String> =
-        prefs.getString(key, "")!!.split('\n').filter { it.isNotBlank() }
-
-    private fun remember(key: String, list: MutableList<String>, value: String) {
-        val v = value.trim()
-        if (v.isEmpty()) return
-        list.remove(v); list.add(0, v)
-        while (list.size > 30) list.removeAt(list.lastIndex)
-        prefs.edit().putString(key, list.joinToString("\n")).apply()
-    }
-
-    fun credits() = Credits(author.trim(), license, contact.trim())
+    /** Your name, licence, choices and past answers, kept between runs. */
+    val settings = Settings(app)
 
     // ---- the current batch
     var phase by mutableStateOf(Phase.Start)
@@ -133,7 +90,7 @@ class AppModel(private val app: Application) {
         scope.launch {
             val zips = mutableListOf<FoundZip>()
             val found = withContext(Dispatchers.IO) {
-                runCatching { where.flatMap { Rolls.find(app, it, zips, deleteInfoFiles) { s -> status = s } } }
+                runCatching { where.flatMap { Rolls.find(app, it, zips, settings.deleteInfoFiles) { s -> status = s } } }
             }
             found.onSuccess { rolls.addAll(it) }.onFailure { status = "Couldn't read the folder: ${it.message}" }
             zipsFound.addAll(zips.filter { it.doc.uri.toString() !in unzipped })
@@ -218,9 +175,9 @@ class AppModel(private val app: Application) {
 
     fun startUnzip() {
         if (plans.isEmpty()) return
-        saveSettings()
+        settings.save()
         val todo = plans.toList()
-        val datesForJpegs = labJpegDates
+        val datesForJpegs = settings.labJpegDates
         stop = false
         phase = Phase.Unzipping
         log.clear()
@@ -262,7 +219,7 @@ class AppModel(private val app: Application) {
                     unzipped += p.uri.toString()
                     log += "✓ ${p.zipName}: ${parts.joinToString(", ")}"
                     out.problems.forEach { log += "✗ $it" }
-                    if (deleteZips && out.problems.isEmpty()) log += if (withContext(Dispatchers.IO) { runCatching { p.delete() }.getOrDefault(false) })
+                    if (settings.deleteZips && out.problems.isEmpty()) log += if (withContext(Dispatchers.IO) { runCatching { p.delete() }.getOrDefault(false) })
                         "  ${p.zipName} deleted" else "  ${p.zipName} couldn't be deleted; delete it in My Files"
                 }.onFailure {
                     if (it is Unzip.Cancelled) log += "Stopped. ${parts.joinToString(", ")} from ${p.zipName}; " +
@@ -302,7 +259,7 @@ class AppModel(private val app: Application) {
                 for (roll in rolls.toList()) for (f in roll.files) {
                     if (f.error != null || f.thumb != null) continue
                     while (typing) delay(250)
-                    f.thumb = Rolls.thumbnail(app, f)
+                    f.thumb = Thumbnails.of(app, f)
                 }
             } finally {
                 android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DEFAULT)
@@ -319,15 +276,12 @@ class AppModel(private val app: Application) {
     @OptIn(ExperimentalCoroutinesApi::class)
     fun convert() {
         val todo = activeRolls
-        todo.forEach { r ->
-            remember("cameras", cameras, r.camera); remember("lenses", lenses, r.lens); remember("labs", labs, r.lab)
-            if (r.film.isNotBlank() && com.barion.filmscans.core.FILM_STOCKS.none { it.name.equals(r.film.trim(), true) })
-                remember("films", customFilms, r.film)
-        }
-        saveSettings()
+        todo.forEach { settings.rememberAnswers(it) }
+        settings.save()
         thumbJob?.cancel()
-        val credits = credits()
-        val keep = keepTiffs
+        val credits = settings.credits()
+        val keep = settings.keepTiffs
+        val quality = settings.quality
         total = todo.sumOf { it.files.size }
         done = 0
         log.clear()
@@ -348,7 +302,7 @@ class AppModel(private val app: Application) {
                         // Stopped: files not yet started are left exactly as they are.
                         if (stop) { failed.incrementAndGet(); withContext(Dispatchers.Main) { done++ }; return@async }
                         try {
-                            Rolls.convertOne(app, roll, f, i, meta, credits, quality, keep) { p -> if (i % 3 == 0) fileProgress = p }
+                            Convert.one(app, roll, f, i, meta, credits, quality, keep) { p -> if (i % 3 == 0) fileProgress = p }
                             f.done = true
                             withContext(Dispatchers.Main) { log += "✓ ${roll.name}/${f.name} → ${f.newName}.jpg" }
                         } catch (t: Throwable) {
@@ -371,14 +325,14 @@ class AppModel(private val app: Application) {
                     continue
                 }
                 if (roll.deleteSidecars && roll.sidecars.isNotEmpty()) {
-                    val n = withContext(Dispatchers.IO) { Rolls.deleteSidecars(roll) }
+                    val n = withContext(Dispatchers.IO) { Convert.deleteSidecars(roll) }
                     log += "${roll.name}: deleted $n info file(s)"
                 }
                 if (roll.renameFolder) renames += roll
             }
             // Deepest folders first, so renaming a parent doesn't break its children's links.
             for (roll in renames.sortedByDescending { depth(it) }) {
-                val err = withContext(Dispatchers.IO) { Rolls.renameFolder(app, roll) }
+                val err = withContext(Dispatchers.IO) { Convert.renameFolder(app, roll) }
                 log += if (err == null) "${roll.name} → ${roll.newFolderName}" else "${roll.name}: $err"
                 if (err == null) for (i in outputs.indices) if (outputs[i].roll === roll) outputs[i] = outputs[i].copy(renamed = true)
             }

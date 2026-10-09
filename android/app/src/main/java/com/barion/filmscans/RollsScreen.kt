@@ -150,7 +150,7 @@ internal fun actionLabel(rolls: List<Roll>, replace: Boolean): String {
 /** The one choice that deletes files, stated plainly before anything happens. */
 @Composable
 private fun ModeCard(m: AppModel) {
-    val replace = !m.keepTiffs
+    val replace = !m.settings.keepTiffs
     val hasJpegs = m.shownRolls.any { it.jpegRoll }
     val hasTiffs = m.shownRolls.any { !it.jpegRoll }
     Card(
@@ -161,8 +161,8 @@ private fun ModeCard(m: AppModel) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(if (hasJpegs) "What happens to the originals?" else "What happens to the TIFFs?",
                 style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-            Row(Modifier.fillMaxWidth().clickable { m.keepTiffs = true }, verticalAlignment = Alignment.Top) {
-                RadioButton(selected = m.keepTiffs, onClick = { m.keepTiffs = true })
+            Row(Modifier.fillMaxWidth().clickable { m.settings.keepTiffs = true }, verticalAlignment = Alignment.Top) {
+                RadioButton(selected = m.settings.keepTiffs, onClick = { m.settings.keepTiffs = true })
                 Column(Modifier.padding(top = 12.dp)) {
                     Text("Keep them", fontWeight = FontWeight.SemiBold)
                     Text(listOfNotNull(
@@ -172,8 +172,8 @@ private fun ModeCard(m: AppModel) {
                     ).joinToString(" "), style = MaterialTheme.typography.bodySmall)
                 }
             }
-            Row(Modifier.fillMaxWidth().clickable { m.keepTiffs = false }, verticalAlignment = Alignment.Top) {
-                RadioButton(selected = replace, onClick = { m.keepTiffs = false })
+            Row(Modifier.fillMaxWidth().clickable { m.settings.keepTiffs = false }, verticalAlignment = Alignment.Top) {
+                RadioButton(selected = replace, onClick = { m.settings.keepTiffs = false })
                 Column(Modifier.padding(top = 12.dp)) {
                     Text(if (hasTiffs) "Replace them: DELETE the TIFFs" else "Replace them: tag the JPEGs in place",
                         fontWeight = FontWeight.SemiBold,
