@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'">
+  <title>LabUnzip</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="titleblock">
+      <h1>LabUnzip</h1>
+      <div class="subtitle" id="archiveName">No archive open</div>
+    </div>
+    <div class="topactions">
+      <button id="openBtn" class="btn ghost">Open a zip…</button>
+    </div>
+  </header>
+
+  <!-- Step 1: waiting for an archive -->
+  <section id="emptyState" class="pane centred">
+    <div class="empty">
+      <h2>Right-click a lab zip and choose <strong>Unpack with LabUnzip</strong></h2>
+      <p>Or open one from here. Nested zips are unpacked too, in one pass.</p>
+      <button id="openBtn2" class="btn primary">Open a zip…</button>
+    </div>
+  </section>
+
+  <!-- Step 2: reading the archive -->
+  <section id="scanningState" class="pane centred" hidden>
+    <div class="empty">
+      <h2>Reading the archive</h2>
+      <p id="scanDetail" class="muted">Nothing is written until you approve the plan.</p>
+      <div class="spinner"></div>
+    </div>
+  </section>
+
+  <!-- Step 3: the plan -->
+  <section id="planState" class="pane" hidden>
+    <div class="destbar">
+      <label for="destPath">Destination</label>
+      <input id="destPath" type="text" placeholder="Choose where the photos should go" readonly>
+      <button id="destBtn" class="btn">Choose…</button>
+    </div>
+
+    <div class="summary" id="summary"></div>
+    <div class="conflicts" id="conflicts" hidden></div>
+
+    <div class="planbody">
+      <div class="colhead">
+        <span>Folder and settings</span>
+        <span>Result</span>
+      </div>
+      <div id="folderList"></div>
+    </div>
+
+    <footer class="actions">
+      <div id="planStatus" class="muted"></div>
+      <button id="runBtn" class="btn primary" disabled>Unpack</button>
+    </footer>
+  </section>
+
+  <!-- Step 4: running -->
+  <section id="runState" class="pane centred" hidden>
+    <div class="empty wide">
+      <h2 id="runPhase">Unpacking</h2>
+      <div class="progress"><div id="progressBar" class="bar"></div></div>
+      <p id="runDetail" class="muted"></p>
+      <button id="cancelBtn" class="btn ghost">Cancel</button>
+    </div>
+  </section>
+
+  <!-- Step 5: finished -->
+  <section id="doneState" class="pane centred" hidden>
+    <div class="empty wide">
+      <h2 id="doneTitle">Done</h2>
+      <div id="doneSummary"></div>
+      <div id="doneErrors" class="errorbox" hidden></div>
+      <div class="donebuttons">
+        <button id="revealBtn" class="btn primary">Open the folder</button>
+        <button id="againBtn" class="btn ghost">Unpack another</button>
+      </div>
+    </div>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -10,12 +10,12 @@ val runNumber = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
 
 android {
     namespace = "com.barion.filmscans"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.barion.filmscans"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = runNumber
         versionName = "1.0.$runNumber"
     }
@@ -56,7 +56,6 @@ dependencies {
     implementation(composeBom)
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("androidx.activity:activity-compose:1.10.1")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")

@@ -21,15 +21,16 @@ class JpegEncoder(
     private val cTable = IntArray(64)
     private val fdtblY = FloatArray(64)
     private val fdtblC = FloatArray(64)
-    private val ydcHT = huffTable(DC_LUM_BITS, DC_LUM_VALS)
-    private val yacHT = huffTable(AC_LUM_BITS, AC_LUM_VALS)
-    private val cdcHT = huffTable(DC_CHR_BITS, DC_CHR_VALS)
-    private val cacHT = huffTable(AC_CHR_BITS, AC_CHR_VALS)
+    private val ydcHT = Huff(DC_LUM_BITS, DC_LUM_VALS)
+    private val yacHT = Huff(AC_LUM_BITS, AC_LUM_VALS)
+    private val cdcHT = Huff(DC_CHR_BITS, DC_CHR_VALS)
+    private val cacHT = Huff(AC_CHR_BITS, AC_CHR_VALS)
 
     private val stripe = ByteArray(8 * width * channels)
     private var stripeRows = 0
     private var rowsDone = 0
 
+    // Bits waiting to be written: the low [bitCnt] bits of [bitBuf] (never more than 7 between calls).
     private var bitBuf = 0
     private var bitCnt = 0
     private val obuf = ByteArray(1 shl 16)
@@ -111,10 +112,11 @@ class JpegEncoder(
         var x = 0
         while (x < width) {
             var k = 0
+            val inside = x + 8 <= width // no edge to repeat: skip the clamp
             for (yy in 0 until 8) {
                 val base = yy * rowLen
                 for (xx in 0 until 8) {
-                    val px = minOf(x + xx, width - 1)
+                    val px = if (inside) x + xx else minOf(x + xx, width - 1)
                     if (channels == 1) {
                         blkY[k] = (stripe[base + px].u() - 128).toFloat()
                     } else {
@@ -137,66 +139,57 @@ class JpegEncoder(
         stripeRows = 0
     }
 
-    private fun processDU(data: FloatArray, fdtbl: FloatArray, dc: Int, htdc: Array<IntArray>, htac: Array<IntArray>): Int {
+    private fun processDU(data: FloatArray, fdtbl: FloatArray, dc: Int, htdc: Huff, htac: Huff): Int {
         fdct(data)
         for (i in 0 until 64) {
             val v = data[i] * fdtbl[i]
             du[ZIGZAG[i]] = if (v > 0f) (v + 0.5f).toInt() else (v - 0.5f).toInt()
         }
         val diff = du[0] - dc
-        if (diff == 0) writeCode(htdc[0]) else {
+        if (diff == 0) writeCode(htdc, 0) else {
             val cat = category(diff)
-            writeCode(htdc[cat]); writeBits(bitsFor(diff, cat), cat)
+            writeCode(htdc, cat); writeBits(bitsFor(diff, cat), cat)
         }
         var end0 = 63
         while (end0 > 0 && du[end0] == 0) end0--
-        if (end0 == 0) { writeCode(htac[0x00]); return du[0] }
+        if (end0 == 0) { writeCode(htac, 0x00); return du[0] }
         var i = 1
         while (i <= end0) {
             val start = i
             while (du[i] == 0 && i <= end0) i++
             var zeros = i - start
             if (zeros >= 16) {
-                repeat(zeros shr 4) { writeCode(htac[0xF0]) }
+                repeat(zeros shr 4) { writeCode(htac, 0xF0) }
                 zeros = zeros and 0xF
             }
             val cat = category(du[i])
-            writeCode(htac[(zeros shl 4) + cat])
+            writeCode(htac, (zeros shl 4) + cat)
             writeBits(bitsFor(du[i], cat), cat)
             i++
         }
-        if (end0 != 63) writeCode(htac[0x00])
+        if (end0 != 63) writeCode(htac, 0x00)
         return du[0]
     }
 
-    private fun category(v: Int): Int {
-        var a = if (v < 0) -v else v
-        var n = 0
-        while (a != 0) { n++; a = a shr 1 }
-        return n
-    }
+    /** Bits needed for |v|. */
+    private fun category(v: Int): Int = 32 - Integer.numberOfLeadingZeros(if (v < 0) -v else v)
 
     private fun bitsFor(v: Int, cat: Int) = if (v >= 0) v else v + (1 shl cat) - 1
 
-    private fun writeCode(c: IntArray) = writeBits(c[0], c[1])
+    private fun writeCode(h: Huff, symbol: Int) = writeBits(h.code[symbol], h.size[symbol])
 
+    /** Appends the low [len] (up to 16) bits of [value], a whole byte at a time. */
     private fun writeBits(value: Int, len: Int) {
-        var n = len - 1
-        while (n >= 0) {
-            bitBuf = (bitBuf shl 1) or ((value shr n) and 1)
-            bitCnt++
-            if (bitCnt == 8) {
-                putByte(bitBuf and 0xFF)
-                if (bitBuf and 0xFF == 0xFF) putByte(0)
-                bitBuf = 0; bitCnt = 0
-            }
-            n--
+        bitBuf = (bitBuf shl len) or (value and ((1 shl len) - 1))
+        bitCnt += len
+        while (bitCnt >= 8) {
+            bitCnt -= 8
+            val b = (bitBuf ushr bitCnt) and 0xFF
+            if (olen >= obuf.size - 1) flushOut()
+            obuf[olen++] = b.toByte()
+            if (b == 0xFF) obuf[olen++] = 0 // byte stuffing
         }
-    }
-
-    private fun putByte(b: Int) {
-        if (olen == obuf.size) flushOut()
-        obuf[olen++] = b.toByte()
+        bitBuf = bitBuf and ((1 shl bitCnt) - 1)
     }
 
     private fun flushOut() { out.write(obuf, 0, olen); olen = 0 }
@@ -278,15 +271,17 @@ class JpegEncoder(
             0xe2, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7, 0xe8, 0xe9, 0xea, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8,
             0xf9, 0xfa)
 
-        /** Code table indexed by symbol: [code, length]. */
-        private fun huffTable(bits: IntArray, vals: IntArray): Array<IntArray> {
-            val t = Array(256) { intArrayOf(0, 0) }
-            var code = 0; var k = 0
-            for (len in 1..16) {
-                repeat(bits[len]) { t[vals[k++]] = intArrayOf(code, len); code++ }
-                code = code shl 1
+        /** A Huffman table by symbol: its code and how many bits long it is. */
+        private class Huff(bits: IntArray, vals: IntArray) {
+            val code = IntArray(256)
+            val size = IntArray(256)
+            init {
+                var c = 0; var k = 0
+                for (len in 1..16) {
+                    repeat(bits[len]) { code[vals[k]] = c; size[vals[k]] = len; k++; c++ }
+                    c = c shl 1
+                }
             }
-            return t
         }
     }
 }
