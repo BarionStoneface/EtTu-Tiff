@@ -12,6 +12,7 @@ function candidateKeys() {
   const keys = [
     'HKCU\\Software\\Classes\\SystemFileAssociations\\compressed\\shell\\LabUnzip',
     'HKCU\\Software\\Classes\\SystemFileAssociations\\.zip\\shell\\LabUnzip',
+    'HKCU\\Software\\Classes\\Directory\\shell\\LabUnzipFixDates',
     // No longer registered, but older installs may still have it.
     'HKCU\\Software\\Classes\\*\\shell\\LabUnzip',
   ];

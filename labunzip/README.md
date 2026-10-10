@@ -81,6 +81,20 @@ If you build a packaged exe (`npm run dist`), run `npm run register` and
 **The app folder must stay where it is.** The shortcut and the menu entry point
 at this directory. If you move it, re-run those two commands.
 
+## Fixing dates on a folder
+
+Photos copied off a phone usually arrive dated the day they were copied. Right-click
+the folder (a roll, or all of `E:\Photos\SLR`) and pick **Fix dates with
+LabUnzip**: every photo in it, subfolders included, gets the date inside it as its
+created and modified date, by the same rules as below. A photo with no date inside
+it is left alone and listed. `npm run register` adds the menu entry; from a
+terminal it's
+
+```bash
+npm run fix-dates -- "E:\Photos\SLR\Roll 12"
+npm run fix-dates -- "E:\Photos\SLR" --dry-run    # shows what would change
+```
+
 ## Where the dates come from
 
 This is the part that mattered most, so it is worth being precise. For each

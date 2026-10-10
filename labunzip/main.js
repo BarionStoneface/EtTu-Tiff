@@ -65,8 +65,44 @@ function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
-// One instance only: a second right-click should reuse the open window.
-if (!app.requestSingleInstanceLock()) {
+/**
+ * "Fix dates with LabUnzip" on a folder: give every photo in it its scan date as its created and
+ * modified date, say what happened, and quit. No window, and separate from an open LabUnzip.
+ */
+function folderToFix(argv) {
+  const i = argv.indexOf('--fix-dates');
+  if (i < 0) return null;
+  const folder = argv[i + 1];
+  try {
+    if (folder && fs.statSync(folder).isDirectory()) return path.resolve(folder);
+  } catch { /* not a real folder */ }
+  return '';
+}
+
+const fixFolder = folderToFix(process.argv);
+
+if (fixFolder !== null) {
+  app.whenReady().then(async () => {
+    const { fixDates, describe } = require('./src/fixdates');
+    let message;
+    let type = 'info';
+    if (!fixFolder) {
+      message = 'That isn\'t a folder LabUnzip can open.';
+      type = 'error';
+    } else {
+      try {
+        const result = await fixDates(fixFolder);
+        message = describe(result, fixFolder);
+        if (result.failed.length) type = 'warning';
+      } catch (err) {
+        message = `Couldn't fix the dates: ${err.message}`;
+        type = 'error';
+      }
+    }
+    await dialog.showMessageBox({ type, title: 'LabUnzip: fix dates', message: 'Fix dates', detail: message, buttons: ['OK'] });
+    app.quit();
+  });
+} else if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', (_event, argv) => {

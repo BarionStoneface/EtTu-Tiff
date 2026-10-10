@@ -15,9 +15,12 @@ import java.time.LocalDateTime
 
 /** Turning a roll's files into JPEGs (or tagging the lab's), and tidying the folder after. */
 object Convert {
-    /** Convert one file. The TIFF is deleted only after the JPEG is written and read back. */
+    /**
+     * Convert one file. The TIFF is deleted only after the JPEG is written and read back. Returns
+     * whether the JPEG's own file date could be set to the scan date (see [FileDates]).
+     */
     fun one(ctx: Context, roll: Roll, f: ScanFile, index: Int, meta: RollMeta, credits: Credits, quality: Int,
-            keepTiff: Boolean, progress: (Float) -> Unit) {
+            keepTiff: Boolean, progress: (Float) -> Unit): Boolean {
         if (f.isJpeg) return tag(ctx, roll, f, index, meta, credits, keepTiff)
         val target = f.newName + ".jpg"
         val existing = roll.existing[target.lowercase()]
@@ -37,7 +40,9 @@ object Convert {
             if (existing == null) runCatching { outDoc.delete() }
             throw e
         }
+        val dated = FileDates.set(outDoc.uri, date)
         if (!keepTiff && !f.doc.delete()) throw IllegalStateException("JPEG saved, but the TIFF couldn't be deleted")
+        return dated
     }
 
     private fun scanDate(roll: Roll, f: ScanFile): LocalDateTime = if (f.date.embedded) f.date.date else roll.overrideDate()
@@ -52,7 +57,7 @@ object Convert {
      * tagged file is written and reads back; under the same name, the new file is written alongside
      * first and swapped in.
      */
-    private fun tag(ctx: Context, roll: Roll, f: ScanFile, index: Int, meta: RollMeta, credits: Credits, keep: Boolean) {
+    private fun tag(ctx: Context, roll: Roll, f: ScanFile, index: Int, meta: RollMeta, credits: Credits, keep: Boolean): Boolean {
         val date = scanDate(roll, f)
         val target = f.newName + ".jpg"
         val sameName = !keep && target.equals(f.name, ignoreCase = true)
@@ -76,20 +81,21 @@ object Convert {
             runCatching { outDoc.delete() }
             throw e
         }
-        if (keep) return
+        if (keep) return FileDates.set(outDoc.uri, date)
         if (!sameName) {
             if (!f.doc.delete()) error("tagged as $target, but the original couldn't be removed")
-            return
+            return FileDates.set(outDoc.uri, date)
         }
         // Same name: swap the tagged file in for the original.
         if (!f.doc.delete()) { runCatching { outDoc.delete() }; error("couldn't replace the original") }
         val renamed = runCatching { DocumentsContract.renameDocument(ctx.contentResolver, outDoc.uri, target) }.getOrNull()
-        if (renamed != null) return
+        if (renamed != null) return FileDates.set(renamed, date)
         // This folder can't rename files: copy the tagged file to the real name instead.
         val final = dir.createFile("image/jpeg", f.newName) ?: error("tagged file left as $target.part; rename it to $target")
         ctx.contentResolver.openInputStream(outDoc.uri)!!.use { i -> ctx.contentResolver.openOutputStream(final.uri)!!.use { i.copyTo(it, 1 shl 16) } }
         verify(ctx, final.uri, f)
         outDoc.delete()
+        return FileDates.set(final.uri, date)
     }
 
     private fun verify(ctx: Context, uri: Uri, f: ScanFile) {

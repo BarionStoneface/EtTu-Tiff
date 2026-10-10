@@ -10,7 +10,8 @@
     "register": "node scripts/register-context-menu.js",
     "unregister": "node scripts/unregister-context-menu.js",
     "dist": "electron-builder --win",
-    "shortcut": "node scripts/create-shortcut.js"
+    "shortcut": "node scripts/create-shortcut.js",
+    "fix-dates": "node scripts/fix-dates.js"
   },
   "dependencies": {
     "exifr": "7.1.3",

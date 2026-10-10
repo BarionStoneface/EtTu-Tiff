@@ -100,7 +100,11 @@ function resolveCommand() {
   ].find((p) => p && fs.existsSync(p));
 
   if (packaged) {
-    return { command: `"${packaged}" "%1"`, icon: packaged, mode: 'packaged', exe: packaged, exeArgs: '', root };
+    return {
+      command: `"${packaged}" "%1"`,
+      folderCommand: `"${packaged}" --fix-dates "%1"`,
+      icon: packaged, mode: 'packaged', exe: packaged, exeArgs: '', root,
+    };
   }
 
   const electron = path.join(root, 'node_modules', 'electron', 'dist', 'electron.exe');
@@ -109,6 +113,7 @@ function resolveCommand() {
   }
   return {
     command: `"${electron}" "${root}" "%1"`,
+    folderCommand: `"${electron}" "${root}" --fix-dates "%1"`,
     icon: electron,
     mode: 'development',
     exe: electron,
@@ -123,7 +128,7 @@ function main() {
     process.exit(1);
   }
 
-  const { command, icon, mode, exe, exeArgs, root } = resolveCommand();
+  const { command, folderCommand, icon, mode, exe, exeArgs, root } = resolveCommand();
 
   for (const { key, appliesTo } of targetKeys()) {
     reg(['add', key, '/ve', '/t', 'REG_SZ', '/d', LABEL, '/f']);
@@ -133,10 +138,18 @@ function main() {
     console.log(`  registered: ${key}${appliesTo ? '   (zips only)' : ''}`);
   }
 
+  // Right-click a folder: give the photos in it their scan dates (e.g. a roll copied off the phone).
+  const folderKey = 'HKCU\\Software\\Classes\\Directory\\shell\\LabUnzipFixDates';
+  reg(['add', folderKey, '/ve', '/t', 'REG_SZ', '/d', 'Fix dates with LabUnzip', '/f']);
+  reg(['add', folderKey, '/v', 'Icon', '/t', 'REG_SZ', '/d', icon, '/f']);
+  reg(['add', `${folderKey}\\command`, '/ve', '/t', 'REG_SZ', '/d', folderCommand, '/f']);
+  console.log(`  registered: ${folderKey}   (folders)`);
+
   const sendTo = addToSendTo(exe, exeArgs, root);
   if (sendTo) console.log(`  registered: ${sendTo}`);
 
   console.log(`\n"${LABEL}" is set up for .zip files (${mode} build).`);
+  console.log('"Fix dates with LabUnzip" is set up for folders.');
   console.log(`  command: ${command}`);
   console.log('\nTwo ways to reach it:');
   console.log('  - right-click a zip (on Windows 11, under "Show more options")');

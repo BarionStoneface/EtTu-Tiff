@@ -52,6 +52,12 @@ no.
   on the same name stop it. Inner zips are read where they sit inside the
   outer one, so even a 13 GB `Tiffs.zip` is listed straight away, and
   everything is unpacked in one pass.
+- **File dates, too, where the phone allows.** Each JPEG's own file date (what a
+  file manager shows, and what Windows shows after copying) is set to the scan
+  date, and so is each unzipped file's. Android doesn't let every app do this on
+  every phone; when it refuses, the app says so once, and the scan date is still
+  inside each photo. On a PC, LabUnzip's **Fix dates** (right-click a folder) sets
+  the file dates from the date inside each photo.
 - **Unzipping can stop and carry on.** Each file only gets its real name once
   it's complete. Unzipping the same zip again skips what's already there.
 - **Dates the lab's JPEGs.** A phone can't set a file's date, so a lab JPEG with

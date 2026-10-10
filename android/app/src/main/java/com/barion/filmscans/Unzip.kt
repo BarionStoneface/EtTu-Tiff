@@ -100,6 +100,9 @@ object Unzip {
         var written = 0
         var already = 0
         var jpegsDated = 0
+        /** Files whose own date was set to the scan date, and files the phone wouldn't let us. */
+        var fileDated = 0
+        var fileDateRefused = 0
         val problems = mutableListOf<String>()
         val tops = mutableListOf<DocumentFile>()
         val dates = HashMap<Uri, LocalDateTime>()
@@ -222,7 +225,7 @@ object Unzip {
     /**
      * Carries out [plan] (or, for a zip that can't be read directly, unzips all of it as it streams).
      * With [labJpegDates], a JPEG with no EXIF date taken gets one: its own XMP date if it has one,
-     * otherwise its date in the zip. Phones can't set a file's date, and galleries sort by this.
+     * otherwise its date in the zip. Galleries sort by this; the file's own date is set too where the phone allows.
      */
     fun run(ctx: Context, plan: ZipPlan, labJpegDates: Boolean, out: Outcome, cancelled: () -> Boolean, onBytes: (Long) -> Unit) {
         val top = Names.clean(plan.top)
@@ -234,16 +237,24 @@ object Unzip {
 
         fun one(dirSegs: List<String>, name: String, size: Long?, time: LocalDateTime?, label: String, open: () -> InputStream) {
             try {
+                // The scan date: the file's date in the zip, or for a JPEG the date inside it.
+                var scanDate = Dates.usable(time)
                 val doc = open().use { data ->
                     writer.write(writer.dir(dirSegs), name, size, data, { n -> done += n; onBytes(done) }) { partUri ->
-                        if (labJpegDates && isJpeg(name)) when (val r = dateJpeg(ctx, partUri, time)) {
-                            null -> {}
-                            "" -> out.jpegsDated++
-                            else -> out.problems += "$label: unzipped, but the date couldn't be written into it ($r)"
+                        if (!isJpeg(name)) return@write
+                        val best = headDates(ctx, partUri).firstOrNull()
+                        if (best != null) scanDate = best.date
+                        if (!labJpegDates || best?.source == "EXIF date taken") return@write
+                        val d = scanDate ?: return@write
+                        when (val err = writeDateTaken(ctx, partUri, d)) {
+                            null -> out.jpegsDated++
+                            else -> out.problems += "$label: unzipped, but the date couldn't be written into it ($err)"
                         }
                     }
                 }
                 if (doc == null) out.already++ else out.written++
+                val d = scanDate
+                if (doc != null && d != null) { if (FileDates.set(doc.uri, d)) out.fileDated++ else out.fileDateRefused++ }
                 val usable = Dates.usable(time)
                 val where = doc ?: writer.dir(dirSegs).kids[name.lowercase()]?.file
                 if (usable != null && where != null) out.dates[where.uri] = usable
@@ -290,31 +301,25 @@ object Unzip {
     private class NoClose(input: InputStream) : java.io.FilterInputStream(input) { override fun close() {} }
 
 
-    /**
-     * Writes a date taken into a JPEG that has none. Returns null if nothing was needed or nothing is
-     * known, "" when written, or why it failed.
-     */
-    private fun dateJpeg(ctx: Context, uri: Uri, zipTime: LocalDateTime?): String? {
-        val head = runCatching {
-            ctx.contentResolver.openInputStream(uri)?.use { s ->
-                val b = ByteArray(HEAD); var n = 0
-                while (n < b.size) { val r = s.read(b, n, b.size - n); if (r < 0) break; n += r }
-                b.copyOf(n)
-            }
-        }.getOrNull() ?: return null
-        val found = Dates.fromImage(BytesSource(head))
-        if (found.firstOrNull()?.source == "EXIF date taken") return null
-        val date = found.firstOrNull()?.date ?: Dates.usable(zipTime) ?: return null
-        return runCatching {
-            ctx.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
-                val x = ExifInterface(pfd.fileDescriptor)
-                val s = Metadata.exifDate(date)
-                x.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, s)
-                if (x.getAttribute(ExifInterface.TAG_DATETIME_DIGITIZED) == null) x.setAttribute(ExifInterface.TAG_DATETIME_DIGITIZED, s)
-                if (x.getAttribute(ExifInterface.TAG_DATETIME) == null) x.setAttribute(ExifInterface.TAG_DATETIME, s)
-                x.saveAttributes()
-            } ?: error("couldn't open it for writing")
-            ""
-        }.getOrElse { it.message ?: it.javaClass.simpleName }
-    }
+    /** The dates in the start of a JPEG (its EXIF and XMP), best first. */
+    private fun headDates(ctx: Context, uri: Uri): List<DateFound> = runCatching {
+        ctx.contentResolver.openInputStream(uri)?.use { s ->
+            val b = ByteArray(HEAD); var n = 0
+            while (n < b.size) { val r = s.read(b, n, b.size - n); if (r < 0) break; n += r }
+            Dates.fromImage(BytesSource(b.copyOf(n)))
+        }
+    }.getOrNull().orEmpty()
+
+    /** Writes [date] as the JPEG's date taken. Null when done, or why it couldn't be. */
+    private fun writeDateTaken(ctx: Context, uri: Uri, date: LocalDateTime): String? = runCatching {
+        ctx.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
+            val x = ExifInterface(pfd.fileDescriptor)
+            val s = Metadata.exifDate(date)
+            x.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, s)
+            if (x.getAttribute(ExifInterface.TAG_DATETIME_DIGITIZED) == null) x.setAttribute(ExifInterface.TAG_DATETIME_DIGITIZED, s)
+            if (x.getAttribute(ExifInterface.TAG_DATETIME) == null) x.setAttribute(ExifInterface.TAG_DATETIME, s)
+            x.saveAttributes()
+        } ?: error("couldn't open it for writing")
+        null
+    }.getOrElse { it.message ?: it.javaClass.simpleName }
 }

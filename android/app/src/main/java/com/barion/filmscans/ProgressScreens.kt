@@ -69,6 +69,10 @@ internal fun DoneScreen(m: AppModel) {
             Text(if (failed == 0) "Done — $made JPEGs saved." else "Done — $made saved, $failed didn't convert.",
                 style = MaterialTheme.typography.headlineSmall)
             if (failed > 0) Text("The TIFFs that didn't convert are untouched.", style = MaterialTheme.typography.bodySmall)
+            // Whether the files' own dates could be set to the scan dates: worth seeing without opening the details.
+            m.log.firstOrNull { it.startsWith("File dates") || it.startsWith("This phone doesn't let") }?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall)
+            }
         }
         items(m.outputs, key = { it.roll.folder.uri.toString() }) { o ->
             Card(Modifier.fillMaxWidth()) {

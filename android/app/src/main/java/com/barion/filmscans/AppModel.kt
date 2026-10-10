@@ -219,6 +219,7 @@ class AppModel(private val app: Application) {
                     unzipped += p.uri.toString()
                     log += "✓ ${p.zipName}: ${parts.joinToString(", ")}"
                     out.problems.forEach { log += "✗ $it" }
+                    FileDates.summary(out.fileDated, out.fileDateRefused)?.let { log += "  $it" }
                     if (settings.deleteZips && out.problems.isEmpty()) log += if (withContext(Dispatchers.IO) { runCatching { p.delete() }.getOrDefault(false) })
                         "  ${p.zipName} deleted" else "  ${p.zipName} couldn't be deleted; delete it in My Files"
                 }.onFailure {
@@ -291,6 +292,8 @@ class AppModel(private val app: Application) {
         WorkService.start(app, "Converting")
         // A few files at once: memory stays small because rows are streamed.
         val workers = Dispatchers.Default.limitedParallelism(minOf(3, Runtime.getRuntime().availableProcessors()))
+        val datesSet = AtomicInteger(0)
+        val datesRefused = AtomicInteger(0)
         scope.launch {
             val renames = mutableListOf<Roll>()
             for (roll in todo) {
@@ -302,7 +305,8 @@ class AppModel(private val app: Application) {
                         // Stopped: files not yet started are left exactly as they are.
                         if (stop) { failed.incrementAndGet(); withContext(Dispatchers.Main) { done++ }; return@async }
                         try {
-                            Convert.one(app, roll, f, i, meta, credits, quality, keep) { p -> if (i % 3 == 0) fileProgress = p }
+                            val dated = Convert.one(app, roll, f, i, meta, credits, quality, keep) { p -> if (i % 3 == 0) fileProgress = p }
+                            (if (dated) datesSet else datesRefused).incrementAndGet()
                             f.done = true
                             withContext(Dispatchers.Main) { log += "✓ ${roll.name}/${f.name} → ${f.newName}.jpg" }
                         } catch (t: Throwable) {
@@ -344,6 +348,7 @@ class AppModel(private val app: Application) {
                 val media = withContext(Dispatchers.IO) { Places.scan(app, o.roll.outputUri ?: o.roll.folder.uri, names) }
                 outputs[i] = o.copy(media = media)
             }
+            FileDates.summary(datesSet.get(), datesRefused.get())?.let { log += it }
             if (stop) log += "Stopped. Scans not converted yet were left untouched."
             status = ""
             phase = Phase.Done

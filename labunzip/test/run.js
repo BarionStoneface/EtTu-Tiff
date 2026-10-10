@@ -11,6 +11,7 @@ const { scanArchive, rollFolders } = require('../src/zipscan');
 const { planFrom, buildOutputPlan } = require('../src/plan');
 const { runPlan } = require('../src/extract');
 const { writeZip, jpegWithDate } = require('./makezip');
+const { fixDates } = require('../src/fixdates');
 
 let passed = 0;
 const failures = [];
@@ -310,6 +311,31 @@ function test(name, fn) {
         `${path.basename(target)} was left with the metadata-write time instead of the scan date`,
       );
     }
+  });
+
+  await test('fixing a folder gives each photo the date inside it, and leaves undated ones alone', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'labunzip-fix-'));
+    fs.mkdirSync(path.join(dir, 'Roll 1'));
+    const a = path.join(dir, 'Roll 1', '0001.jpg');
+    const b = path.join(dir, 'Roll 1', '0002.jpg');
+    const c = path.join(dir, 'Roll 1', 'nodate.jpg');
+    fs.writeFileSync(a, jpegWithDate('2026:03:14 09:30:00'));
+    fs.writeFileSync(b, jpegWithDate('2025:12:01 18:05:10'));
+    fs.writeFileSync(c, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    fs.writeFileSync(path.join(dir, 'Roll 1', '._0001.jpg'), 'junk');
+    const before = fs.statSync(c).mtimeMs;
+
+    const dry = await fixDates(dir, { dryRun: true });
+    assert.strictEqual(dry.dated.length, 2);
+    assert.notStrictEqual(Math.round(fs.statSync(a).mtimeMs / 1000), Math.round(new Date(2026, 2, 14, 9, 30, 0).getTime() / 1000));
+
+    const r = await fixDates(dir);
+    assert.strictEqual(r.checked, 3);
+    assert.strictEqual(r.dated.length, 2);
+    assert.deepStrictEqual(r.undated, [c]);
+    assert.strictEqual(Math.round(fs.statSync(a).mtimeMs / 1000), Math.round(new Date(2026, 2, 14, 9, 30, 0).getTime() / 1000));
+    assert.strictEqual(Math.round(fs.statSync(b).mtimeMs / 1000), Math.round(new Date(2025, 11, 1, 18, 5, 10).getTime() / 1000));
+    assert.strictEqual(fs.statSync(c).mtimeMs, before);
   });
 
   await test('only files in the approved plan are written', async () => {
