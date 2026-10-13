@@ -1,0 +1,55 @@
+name: Clean up
+
+# Keeps Actions storage near zero without touching repository settings:
+# every day, deletes artifacts and run logs older than a day.
+# Run by hand (or by changing this file on the branch) it also deletes every
+# artifact and the build caches straight away.
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+  push:
+    branches: [claude/labunzip-handoff-n6rhc0]
+    paths:
+      - '.github/workflows/cleanup.yml'
+
+permissions:
+  actions: write
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete old artifacts, logs and caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVERYTHING: ${{ github.event_name != 'schedule' }}
+        run: |
+          cutoff=$(date -u -d '1 day ago' +%s)
+          old() { [ "$(date -u -d "$1" +%s)" -lt "$cutoff" ]; }
+
+          gh api --paginate "repos/$REPO/actions/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.expired | not) | "\(.id) \(.created_at)"' |
+          while read -r id created; do
+            if [ "$EVERYTHING" = true ] || old "$created"; then
+              echo "artifact $id ($created)"
+              gh api -X DELETE "repos/$REPO/actions/artifacts/$id" || true
+            fi
+          done
+
+          gh api --paginate "repos/$REPO/actions/runs?status=completed&per_page=100" \
+            --jq '.workflow_runs[] | "\(.id) \(.updated_at)"' |
+          while read -r id updated; do
+            if old "$updated"; then
+              gh api -X DELETE "repos/$REPO/actions/runs/$id/logs" >/dev/null 2>&1 && echo "logs of run $id"
+            fi
+          done
+
+          if [ "$EVERYTHING" = true ]; then
+            gh api --paginate "repos/$REPO/actions/caches?per_page=100" --jq '.actions_caches[].id' |
+            while read -r id; do
+              echo "cache $id"
+              gh api -X DELETE "repos/$REPO/actions/caches/$id" || true
+            done
+          fi
