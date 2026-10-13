@@ -38,6 +38,7 @@ jobs:
         with:
           name: apk
           path: EtTuTiff-*.apk
+          retention-days: 1 # the release keeps the APK; this copy is only for the run
 
       - name: Publish to the latest release
         env:
