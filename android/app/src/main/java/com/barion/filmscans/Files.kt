@@ -1,6 +1,5 @@
 package com.barion.filmscans
 
-import com.barion.filmscans.core.Names
 import java.time.format.DateTimeFormatter
 
 /** File names and sizes, the same everywhere in the app. */
@@ -14,7 +13,6 @@ val THUMB_DIR = Regex("""(?i)^[._]*(thumbs?|thumbnails?|thm|previews?)$""")
 
 fun ext(name: String) = name.substringAfterLast('.', "").lowercase()
 fun stem(name: String) = name.substringBeforeLast('.')
-fun cleanName(s: String) = Names.clean(s)
 fun isJpeg(name: String) = ext(name) in JPEG_EXT
 fun isImage(name: String) = ext(name).let { it in JPEG_EXT || it in TIFF_EXT }
 

@@ -26,7 +26,8 @@ object ZipWalk {
     private fun walk(input: InputStream, visit: (String, InputStream, Long) -> Unit, prefix: String, depth: Int) {
         val zis = ZipInputStream(input, NAMES)
         while (true) {
-            val e = zis.nextEntry ?: break
+            // A name flagged as UTF-8 that isn't: ZipInputStream reports it as a bad argument.
+            val e = try { zis.nextEntry } catch (x: IllegalArgumentException) { throw ZipFormatException("a file name in the zip is damaged") } ?: break
             if (e.isDirectory) continue
             val path = Archive.safePath(e.name) ?: continue
             if (Archive.isZip(path) && depth < MAX_DEPTH) {

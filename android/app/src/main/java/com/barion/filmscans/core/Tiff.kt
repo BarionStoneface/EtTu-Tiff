@@ -60,7 +60,7 @@ class TiffReader(private val src: ByteSource, image: Boolean = true) {
         fun rational(): Double = if (type == 5 || type == 10) {
             val d = u32(4); if (d == 0L) 0.0 else u32(0).toDouble() / d
         } else long().toDouble()
-        fun text(): String = String(raw, Charsets.UTF_8).trimEnd('\u0000', ' ').trim()
+        fun text(): String = String(raw, Charsets.UTF_8).replace(CONTROL, "").trim()
     }
 
     // ---- tags
@@ -98,6 +98,10 @@ class TiffReader(private val src: ByteSource, image: Boolean = true) {
         // A JPEG's EXIF block is TIFF-shaped but has no image of its own ([image] = false).
         width = tags[256]?.int() ?: if (image) throw TiffException("no width") else 0
         height = tags[257]?.int() ?: if (image) throw TiffException("no height") else 0
+        if (image) {
+            if (width <= 0 || height <= 0) throw TiffException("damaged TIFF: image size ${width}x$height")
+            if (width > MAX_SIDE || height > MAX_SIDE) throw TiffException("${width}x$height is too big an image for this app")
+        }
         spp = tags[277]?.int() ?: 1
         bits = tags[258]?.longs()?.maxOrNull()?.toInt() ?: 1
         photometric = tags[262]?.int() ?: 1
@@ -154,6 +158,10 @@ class TiffReader(private val src: ByteSource, image: Boolean = true) {
         }
         if (photometric !in setOf(0, 1, 2, 3, 5) && !(photometric == 6 && isJpeg))
             throw TiffException("TIFF colour type $photometric isn't supported")
+        if (spp < 1 || spp > 16) throw TiffException("$spp samples per pixel isn't supported")
+        if (colour == 2 && spp < 3) throw TiffException("damaged TIFF: RGB with $spp sample(s) per pixel")
+        if (colour == 5 && spp < 4) throw TiffException("damaged TIFF: CMYK with $spp sample(s) per pixel")
+        if (colour == 3 && (bits > 16 || tags[320] == null)) throw TiffException("damaged TIFF: palette missing")
         when (predictor) {
             1 -> {}
             2 -> if (isFloat || bits !in setOf(8, 16, 32)) throw TiffException("TIFF predictor 2 with $bits-bit samples isn't supported")
@@ -175,9 +183,11 @@ class TiffReader(private val src: ByteSource, image: Boolean = true) {
      */
     fun readRows(wantRow: ((Int) -> Boolean)? = null, sink: (Int, Int, ByteArray) -> Unit) {
         checkSupported()
-        val tiled = tags.containsKey(322)
-        val chunkW = if (tiled) tags[322]!!.int() else width
-        val chunkH = if (tiled) tags[323]!!.int() else (tags[278]?.long()?.coerceAtMost(height.toLong())?.toInt() ?: height).coerceAtLeast(1)
+        val tiled = tags.containsKey(322) || tags.containsKey(324)
+        val chunkW = if (tiled) tags[322]?.int() ?: throw TiffException("damaged TIFF: no tile width") else width
+        val chunkH = if (tiled) tags[323]?.int() ?: throw TiffException("damaged TIFF: no tile length")
+            else (tags[278]?.long()?.coerceAtMost(height.toLong())?.toInt() ?: height).coerceAtLeast(1)
+        if (chunkW <= 0 || chunkH <= 0 || chunkW > MAX_SIDE || chunkH > MAX_SIDE) throw TiffException("damaged TIFF: tile size ${chunkW}x$chunkH")
         val offsets = (if (tiled) tags[324] else tags[273])?.longs() ?: throw TiffException("no image data")
         val counts = (if (tiled) tags[325] else tags[279])?.longs()
         val planes = if (planar == 2) spp else 1
@@ -186,14 +196,16 @@ class TiffReader(private val src: ByteSource, image: Boolean = true) {
         val down = (height + chunkH - 1) / chunkH
         val perPlane = across * down
         val chunkRowBytes = ((chunkW.toLong() * sppChunk * bits + 7) / 8).toInt()
+        if (tiled && chunkRowBytes.toLong() * chunkH > MAX_CHUNK) throw TiffException("damaged TIFF: ${chunkRowBytes.toLong() * chunkH shr 20} MB tiles")
 
         val oc = outChannels
         // Samples for one band of rows, all planes gathered as chunky whole numbers (0..sampleMax).
         // Uncompressed strips are read a band of rows at a time straight from the file, so a scan stored
-        // as one giant strip doesn't have to be loaded whole. A compressed strip has to be decoded whole,
-        // but is then worked through 64 rows at a time, so only one copy of it is ever held.
+        // as one giant strip doesn't have to be loaded whole. A compressed strip or tile has to be decoded
+        // whole, but is then worked through a band at a time, so only one copy of it is ever held. A band
+        // is at most 64 rows and at most BAND_SAMPLES samples, however wide the header says the image is.
         val direct = !tiled && compression == 1
-        val maxBand = if (tiled) chunkH else minOf(64, chunkH, height).coerceAtLeast(1)
+        val maxBand = minOf(64L, chunkH.toLong(), height.toLong(), maxOf(1L, BAND_SAMPLES / (width.toLong() * spp))).toInt()
         val bandSamples = IntArray(maxBand * width * spp)
         val out = ByteArray(maxBand * width * oc)
         // Palette entries are 16-bit; like libtiff, treat a map with nothing over 255 as 8-bit.
@@ -207,16 +219,6 @@ class TiffReader(private val src: ByteSource, image: Boolean = true) {
         // Most scans: plain 8 or 16-bit whole numbers, read directly.
         val plain = !fl && !signed && (sb == 1 || sb == 2)
 
-        // Where each band starts. Bands never cross from one strip or tile row into the next.
-        val starts = ArrayList<Int>()
-        run {
-            var y = 0
-            while (y < height) {
-                val chunkEnd = if (direct) height else minOf(height, (y / chunkH + 1) * chunkH)
-                while (y < chunkEnd) { starts += y; y += maxBand }
-                y = chunkEnd
-            }
-        }
         val rowBuf = if (direct) ByteArray(chunkRowBytes) else ByteArray(0)
         // The last strip or tile decoded for each column of tiles and plane, reused by the next band.
         val cachedIdx = IntArray(planes * across) { -1 }
@@ -260,8 +262,24 @@ class TiffReader(private val src: ByteSource, image: Boolean = true) {
             }
         }
 
+        // Whole number (0..maxVal) to 8-bit, looked up rather than divided for every sample.
+        val lut = IntArray(maxVal + 1) { v -> if (maxVal == 255) v else (v * 255 + maxVal / 2) / maxVal }
         val separate = planar == 2
+        // The usual scan: chunky 8 or 16-bit gray or RGB with nothing extra. Rows go straight to 8-bit output.
+        val fast = plain && !separate && (colour == 1 || colour == 2) && spp == oc
         fun unpack(data: ByteArray, rowOff: Int, r: Int, x0: Int, cols: Int, plane: Int) {
+            if (fast) {
+                val n = cols * oc
+                val o = (r * width + x0) * oc
+                val avail = ((data.size - rowOff) / sb).coerceIn(0, n)
+                if (avail > 0) { // (arraycopy rejects a start past the end even for 0 bytes)
+                    if (sb == 1) System.arraycopy(data, rowOff, out, o, avail)
+                    else if (little) for (i in 0 until avail) { val p = rowOff + 2 * i; out[o + i] = lut[data[p].u() or (data[p + 1].u() shl 8)].toByte() }
+                    else for (i in 0 until avail) { val p = rowOff + 2 * i; out[o + i] = lut[(data[p].u() shl 8) or data[p + 1].u()].toByte() }
+                }
+                java.util.Arrays.fill(out, o + avail, o + n, 0)
+                return
+            }
             val base = (r * width + x0) * spp
             if (plain && !separate) {
                 // The common case, kept tight: chunky 8 or 16-bit samples straight into the band.
@@ -281,14 +299,15 @@ class TiffReader(private val src: ByteSource, image: Boolean = true) {
                 }
             }
         }
-        // Whole number (0..maxVal) to 8-bit, looked up rather than divided for every sample.
-        val lut = IntArray(maxVal + 1) { v -> if (maxVal == 255) v else (v * 255 + maxVal / 2) / maxVal }
 
-        for (bi in starts.indices) {
-            val y0 = starts[bi]
-            val rows = (if (bi + 1 < starts.size) starts[bi + 1] else height) - y0
+        var y0 = 0
+        while (y0 < height) {
+            // Bands never cross from one strip or tile row into the next.
+            val chunkEnd = if (direct) height else minOf(height.toLong(), (y0 / chunkH + 1L) * chunkH).toInt()
+            val rows = minOf(maxBand, chunkEnd - y0)
+            val next = y0 + rows
             // Thumbnails only need some rows: skip whole bands that hold none of them.
-            if (wantRow != null && (y0 until y0 + rows).none(wantRow)) continue
+            if (wantRow != null && (y0 until next).none(wantRow)) { y0 = next; continue }
             if (direct) {
                 val rps = chunkH
                 for (plane in 0 until planes) for (r in 0 until rows) {
@@ -297,9 +316,10 @@ class TiffReader(private val src: ByteSource, image: Boolean = true) {
                     val idx = plane * down + y / rps
                     if (idx >= offsets.size) throw TiffException("image data is truncated")
                     val off = offsets[idx] + (y % rps).toLong() * chunkRowBytes
-                    java.util.Arrays.fill(rowBuf, 0)
+                    if (off < 0 || off >= src.size) throw TiffException("image data is truncated")
                     val n = minOf(chunkRowBytes.toLong(), src.size - off).toInt()
-                    if (n > 0) src.read(off, rowBuf, 0, n)
+                    if (n < chunkRowBytes) java.util.Arrays.fill(rowBuf, n, chunkRowBytes, 0)
+                    src.read(off, rowBuf, 0, n)
                     undoPredictor(rowBuf, chunkRowBytes, sppChunk, chunkW)
                     unpack(rowBuf, 0, r, 0, width, plane)
                 }
@@ -320,8 +340,8 @@ class TiffReader(private val src: ByteSource, image: Boolean = true) {
                     for (r in 0 until rows) unpack(data, (first + r) * chunkRowBytes, r, x0, cols, plane)
                 }
             }
-            // Convert the band to 8-bit gray or RGB.
-            for (i in 0 until rows * width) {
+            // Convert the band to 8-bit gray or RGB (the fast path already did).
+            if (!fast) for (i in 0 until rows * width) {
                 val b = i * spp
                 val o = i * oc
                 when (colour) {
@@ -346,13 +366,17 @@ class TiffReader(private val src: ByteSource, image: Boolean = true) {
                 }
             }
             sink(y0, rows, out)
+            y0 = next
         }
     }
 
 
     private fun decodeChunk(offset: Long, count: Long?, rowBytes: Int, rows: Int, sppChunk: Int, chunkW: Int): ByteArray {
-        val expected = rowBytes * rows
-        val len = (count ?: expected.toLong()).coerceAtMost(src.size - offset).toInt().coerceAtLeast(0)
+        val need = rowBytes.toLong() * rows
+        if (need > MAX_CHUNK) throw TiffException("a ${need shr 20} MB strip is too big to decode in one piece")
+        if (offset < 0 || offset >= src.size) throw TiffException("image data is truncated")
+        val expected = need.toInt()
+        val len = (count ?: need).coerceAtMost(src.size - offset).toInt().coerceAtLeast(0)
         val raw = ByteArray(len)
         src.read(offset, raw)
         val data = when (compression) {
@@ -440,6 +464,7 @@ class TiffReader(private val src: ByteSource, image: Boolean = true) {
         val n = if (big) u64(cnt, 0) else u16(cnt, 0).toLong()
         if (n <= 0 || n > 4096) throw TiffException("damaged TIFF directory")
         val buf = ByteArray(n.toInt() * entrySize); src.read(pos + cnt.size, buf)
+        var total = 0L
         for (i in 0 until n.toInt()) {
             val e = i * entrySize
             val tag = u16(buf, e)
@@ -447,12 +472,14 @@ class TiffReader(private val src: ByteSource, image: Boolean = true) {
             val count = if (big) u64(buf, e + 4) else u32(buf, e + 4)
             val v = e + if (big) 12 else 8
             val size = TYPE_SIZE.getOrElse(type) { 0 } * count
-            if (size <= 0 || size > 64L * 1024 * 1024) continue
-            val raw = if (size <= inline) buf.copyOfRange(v, v + size.toInt())
-            else ByteArray(size.toInt()).also {
+            if (count < 0 || size <= 0 || size > MAX_TAG) continue
+            val raw = if (size <= inline) buf.copyOfRange(v, v + size.toInt()) else {
                 val off = if (big) u64(buf, v) else u32(buf, v)
-                if (off + size > src.size) return@also
-                src.read(off, it)
+                // A tag pointing outside the file, or a directory asking for more than any real one holds, is damage.
+                if (off < 0 || off + size > src.size) continue
+                total += size
+                if (total > MAX_TAG) throw TiffException("damaged TIFF directory")
+                ByteArray(size.toInt()).also { src.read(off, it) }
             }
             into[tag] = Entry(type, count, raw, little)
         }
@@ -472,6 +499,16 @@ class TiffReader(private val src: ByteSource, image: Boolean = true) {
 
     companion object {
         const val TAG_EXIF_IFD = 34665
+        /** Bytes that have no place in a text tag and would break XML. */
+        val CONTROL = Regex("""[\x00-\x08\x0B\x0C\x0E-\x1F]""")
+        /** Longest side read: 1,048,576 pixels. A 35 mm frame at 8000 dpi is about 11,000. */
+        const val MAX_SIDE = 1 shl 20
+        /** A compressed strip or tile has to be decoded whole, so one can't be bigger than this. */
+        const val MAX_CHUNK = 512L shl 20
+        /** Samples held for one band of rows (32 MB of ints). */
+        const val BAND_SAMPLES = 8L shl 20
+        /** The most one tag (an ICC profile, say) or one directory's tags together may take. */
+        const val MAX_TAG = 64L shl 20
         private val TYPE_SIZE = intArrayOf(0, 1, 1, 2, 4, 8, 1, 1, 2, 4, 8, 4, 8, 4, 0, 0, 8, 8, 8)
 
         @Volatile var jpegDecoder: JpegDecoder? = null
@@ -551,12 +588,15 @@ class TiffReader(private val src: ByteSource, image: Boolean = true) {
             inf.setInput(input)
             val out = ByteArray(expected)
             var n = 0
-            while (n < expected && !inf.finished()) {
-                val r = inf.inflate(out, n, expected - n)
-                if (r == 0 && (inf.needsInput() || inf.needsDictionary())) break
-                n += r
-            }
-            inf.end()
+            try {
+                while (n < expected && !inf.finished()) {
+                    val r = inf.inflate(out, n, expected - n)
+                    if (r == 0 && (inf.needsInput() || inf.needsDictionary())) break
+                    n += r
+                }
+            } catch (e: java.util.zip.DataFormatException) {
+                throw TiffException("damaged compressed data: ${e.message}")
+            } finally { inf.end() }
             return out
         }
 

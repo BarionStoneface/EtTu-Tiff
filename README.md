@@ -2,127 +2,145 @@
 
 *Veni, vidi, JPEG'd.*
 
-Turns film-scan TIFFs into full-quality JPEGs, and tags the lab's own JPEGs,
-one roll at a time. It keeps what matters from the scan, drops what doesn't,
-and writes your own film and copyright details into every photo.
-
-Built for film photographers whose lab or scanner hands them folders of huge
-TIFFs, and who want JPEGs that are smaller but lose nothing visible and carry
-proper metadata.
+An Android app for film photographers whose lab hands them folders of TIFF
+scans. It turns each roll's TIFFs into full quality JPEGs, tags the lab's own
+JPEGs without re-encoding them, and unzips lab downloads with a preview first.
+Every photo gets the roll's film and camera details and your copyright; the
+scan date and scanner are kept, location and everything else is dropped.
 
 ## Get it
 
-Download the APK from [the latest release](../../releases/latest). You may
-need to allow installs from your browser. It needs Android 8 or later. It
-has no access to your storage beyond the folders you choose in Android's own
-picker, and nothing leaves the phone. The one thing it asks, the first time
-a long job starts, is to show notifications, so you can see an unzip or a
-conversion carry on while you're in other apps. It works the same if you say
-no.
+The APK is on [the latest release](../../releases/latest). Android 8 or later.
+Nothing leaves the phone: there is no network code. Folders are opened through
+Android's own picker, so no storage permission is asked for. The one permission
+it asks, the first time a long job starts, is to show notifications, so an
+unzip or conversion can carry on in the background with progress shown. It
+works the same if you say no.
 
 ## What it does
 
-- **Converts at full quality.** It uses JPEG quality 100 with colour kept at
-  full resolution (4:4:4), where Android's built-in encoder would halve it.
-  Pixel dimensions, colour profile and DPI are unchanged. 16-bit scans are
-  rounded to 8 bits, because that's all a JPEG can hold.
-- **Works one roll per folder.** Each roll gets its own camera body, lens,
-  film stock (about 60 in the list, or type your own), box ISO, push/pull,
-  and tags such as expired, redscale, cross-processed or film soup, plus
-  notes and lab. Nothing carries over from the previous roll. Past cameras
-  and lenses are only offered as suggestions.
-- **Keeps the scanner and the original scan date.** The scanner make, model
-  and software are kept. The scan date becomes the photo's "date taken", and
-  is never the download date. It comes from, in order: EXIF date taken, EXIF
-  date digitized, the same dates in XMP (plus XMP CreateDate), EXIF modify
-  date, XMP MetadataDate (the only date some labs write), a `.thm` or `.xmp`
-  file beside the scan, then the file's date inside the zip it came from.
-  Blank "zero" dates such as 1970-01-01 are skipped. If none of those exist,
-  the app asks: type the date, or choose to use the files' dates on the
-  phone, which may just be when they were downloaded. Each roll shows where
-  its dates came from.
-- **Drops location** and every other tag in the original.
-- **Writes your copyright** into EXIF, XMP and IPTC fields and a JPEG
-  comment. You choose "all rights reserved" or a Creative Commons licence.
-- **Unzips lab downloads, with a preview first.** Pick the zip, including one
-  that holds `Jpegs.zip` and `Tiffs.zip`, or a zip per roll. Before anything
-  is written you see every folder it will make, with where each roll's scan
-  dates come from. Rename a folder, clear a name to drop that level, or untick
-  a folder (say, the lab's JPEGs) to leave it out. Two files that would land
-  on the same name stop it. Inner zips are read where they sit inside the
-  outer one, so even a 13 GB `Tiffs.zip` is listed straight away, and
-  everything is unpacked in one pass.
-- **File dates, too, where the phone allows.** Each JPEG's own file date (what a
-  file manager shows, and what Windows shows after copying) is set to the scan
-  date, and so is each unzipped file's. Android doesn't let every app do this on
-  every phone; when it refuses, the app says so once, and the scan date is still
-  inside each photo. On a PC, LabUnzip's **Fix dates** (right-click a folder) sets
-  the file dates from the date inside each photo.
-- **Unzipping can stop and carry on.** Each file only gets its real name once
-  it's complete. Unzipping the same zip again skips what's already there.
-- **Dates the lab's JPEGs.** A phone can't set a file's date, so a lab JPEG with
-  no date taken gets its scan date written in (from its own XMP, or its date in
-  the zip). Galleries then sort it by when it was scanned, not when it was
-  unzipped. Nothing else in the file changes, and it can be turned off. The
-  zip's dates are also remembered for the TIFFs after the app closes.
-- **Tags the lab's JPEGs too, without re-saving them.** Most labs send JPEGs
-  as standard and TIFFs only as an extra. A folder of the lab's JPEGs gets the
-  same roll details, copyright, dates and names as a converted scan, but the
-  picture data is copied byte for byte, so nothing about the image changes.
-  Their old details, location included, are replaced; the colour profile is
-  kept. Keeping the originals puts tagged copies in a new folder beside the
-  roll; replacing them tags them in place.
-- **Reads the TIFFs scanners and editors write.** 1 to 16-bit (including
-  packed 2, 4 and 12-bit), 32-bit and floating-point (16, 32 and 64-bit),
-  BigTIFF over 4 GB, strips or tiles, and no compression, LZW, Deflate,
-  PackBits or JPEG. Each kind is checked against tifffile, the library the
-  desktop script used.
-- **Dry run.** Lists exactly what would happen to every file (its new name,
-  its scan date and where that came from, what gets deleted, renamed or
-  replaced) without changing anything.
-- **Previews the roll first.** Thumbnails are read straight from the TIFFs
-  before anything is converted.
-- **Keeps the lab's file names.** Text is added before or after the lab's name,
-  never instead of it: `008030000001.tif` with `LomoColor92` before and
-  `RoyalWe` after becomes `LomoColor92_008030000001_RoyalWe.jpg`. The added
-  text can use `{nn}`, `{nnn}`, `{date}`, `{roll}` and `{film}`. Names can
-  still be edited one by one, and the original name is always kept inside the
-  JPEG. A JPEG already in the folder is only replaced if you tick to replace it.
-- **Copies details between rolls when asked.** Nothing carries over by itself,
-  but "Copy details from another roll" fills in the camera, film and the rest.
-- **Replace or keep, your choice.** Before converting, you choose between
-  replacing the TIFFs and keeping them with the JPEGs added beside them.
-  Keeping them means nothing is deleted or renamed.
-- **Cleans up safely.** When replacing, each TIFF is deleted only after its
-  JPEG has been written and read back, and `Roll 12 TIFF` is renamed to
-  `Roll 12 JPEG`. The `.thm`, `.xmp` and other info files next to the TIFFs
-  are only deleted if you choose to, per roll; Settings sets where that
-  choice starts (off).
+**Converting TIFFs.** JPEG quality 100 (adjustable down to 85 in Settings),
+colour kept at full resolution (4:4:4), where Android's own encoder would halve
+it. Pixel dimensions, colour profile and DPI are unchanged. 16 bit scans are
+rounded to 8 bits. The encoder and decoder are the app's own; the scan is
+streamed a few rows at a time, so a 500 MB TIFF converts in about 15 MB of
+memory.
 
-Film details are written to the standard EXIF fields and to the
+**Reading TIFFs.** Classic and BigTIFF. 1 to 16 bit integer samples (packed
+2, 4 and 12 bit included), 32 bit integer, and 16, 32 and 64 bit floating
+point. Gray, RGB, CMYK, palette, and YCbCr when JPEG compressed. Strips or
+tiles, chunky or planar. No compression, LZW, Deflate, PackBits and JPEG, with
+the horizontal or floating point predictor. Each kind is checked in the tests
+against tifffile's output.
+
+**One roll per folder.** Each roll gets its own camera, lens, film (about 60
+in the list, or typed), box ISO, push or pull, tags such as expired or
+cross processed, notes and lab. Nothing carries over from the previous roll
+unless you ask with "Copy details from another roll". Past cameras, lenses and
+labs are offered as suggestions.
+
+**Scan date.** Becomes the photo's "date taken". Taken from, in order: EXIF
+date taken, EXIF date digitized, the same in XMP plus XMP CreateDate, EXIF
+modify date, XMP MetadataDate, a `.thm` or `.xmp` file beside the scan, then
+the file's date inside the zip it came from. Zero dates (1970, 1980) are
+skipped. If none exist the app asks you to type one, or to use the files' own
+dates on the phone, which may just be when they were downloaded. The app never
+uses the download date on its own.
+
+**Metadata written.** EXIF, XMP and IPTC, plus a JPEG comment with the
+copyright notice. Film details go to the standard EXIF fields and to the
 [AnalogExif](https://analogexif.sourceforge.net/help/analogexif-xmp.php) XMP
-fields, which ExifTool and film-metadata tools can read.
+fields. Copyright is "all rights reserved" or a Creative Commons licence, set
+once in Settings. The original file name is kept inside the JPEG.
 
-## Desktop versions
+**Lab JPEGs.** A folder holding only JPEGs is tagged rather than converted:
+the image data is copied byte for byte, only the metadata is replaced. Keep the
+originals (tagged copies go in a new folder beside the roll) or replace them in
+place. A JPEG with no date taken gets its scan date written in when unzipped,
+so galleries sort it by scan date; this can be turned off.
 
-`labunzip/` is LabUnzip, a Windows app that unpacks lab downloads (nested
-zips included) and gives every file its scan date as both its created and
-modified date. It adds a right-click "Unpack with LabUnzip" for zips. See
-[labunzip/README.md](labunzip/README.md). The Android app's unzipping, date
-rules and naming come from it.
+**Unzipping.** Pick a zip, including one holding `Jpegs.zip` and `Tiffs.zip`,
+or a zip per roll, up to four levels deep. Inner zips that were stored rather
+than compressed are read in place, so a 13 GB inner zip lists as fast as a
+small one. Before anything is written you see every folder, with where its
+scan dates come from; rename a folder, clear a name to drop that level, or
+untick a folder. Two files landing on the same name stop the plan. Each file
+is written under a temporary name and renamed once complete, and checked
+against the length and checksum in the zip. Unzipping the same zip again skips
+what's already there. Mac and Windows junk (`__MACOSX`, `.DS_Store`,
+`Thumbs.db`) is skipped.
 
+**Names.** Text is added before or after the lab's file name, never instead
+of it: `008030000001.tif` with `LomoColor92` before and `RoyalWe` after becomes
+`LomoColor92_008030000001_RoyalWe.jpg`. `{nn}`, `{nnn}`, `{date}`, `{roll}`
+and `{film}` are filled in. Names can be edited one by one. Characters Windows
+can't take are replaced, and reserved names (`con`, `nul`) are prefixed.
 
-`desktop/tiff2jpeg.py` is an earlier command-line version for Windows, Mac
-and Linux (`pip install -r desktop/requirements.txt`). On Windows you can
-drag a folder onto `tiff2jpeg.bat`.
+**Replace or keep.** Keeping the TIFFs adds the JPEGs beside them and deletes
+nothing. Replacing deletes each TIFF only after its JPEG is written, its size
+on disk matches what was written, and the phone's own decoder reads it back at
+the right size. `Roll 12 TIFF` is then renamed to `Roll 12 JPEG`. Info files
+(`.thm`, `.xmp`, `.txt`...) are deleted only if chosen, per roll.
+
+**Dry run.** Lists what would happen to every file (new name, scan date and
+its source, what gets deleted, renamed or replaced) without changing anything.
+
+**File dates.** Each JPEG's and unzipped file's own date is set to the scan
+date where Android allows it, which varies by phone and folder. When refused,
+the app says so once; the scan date is still inside each photo.
+
+## Limits
+
+- Images up to 1,048,576 pixels a side. A compressed strip or tile has to be
+  decoded whole, so one can't be over 512 MB; uncompressed files have no such
+  limit.
+- Not read: old style JPEG in TIFF (compression 6), Zstandard, WebP, LERC,
+  JPEG 2000. Not read at all: RAW, HEIC, PNG.
+- Zips using a compression other than Deflate or stored, or with passwords,
+  are listed but skipped.
+- Android doesn't let apps save into the Download folder itself; pick Pictures
+  or a folder of your own.
+- English only.
+
+## Damaged and hostile files
+
+The readers are fuzz tested (`RobustnessTest`): thousands of random mutations
+of real TIFFs, JPEGs and zips, plus headers claiming absurd sizes. A damaged
+file fails with a message naming it, in milliseconds, without taking the rest
+of the folder with it. Zip entries that inflate to more than they claim (zip
+bombs) or less (cut off downloads), or whose checksum doesn't match, are
+refused. Paths that would escape the destination (`../`, `C:\`, leading `/`)
+are dropped.
+
+## Signing key
+
+`android/keystore/sideload.keystore` (password `android`) is committed on
+purpose, so every build installs over the last one when sideloaded. The
+consequence: anyone can build an APK that installs as an update over this one
+and reads its settings. Only install APKs from this repo's releases. A Play
+Store build would use a separate upload key.
 
 ## Building
 
-The app is Kotlin with Jetpack Compose, in `android/`. GitHub Actions runs
-the tests, builds the app and publishes the APK on every push to `main`. The
-TIFF decoder, JPEG encoder and metadata writer are plain Kotlin in
-`android/app/src/main/java/com/barion/filmscans/core/`.
+Kotlin with Jetpack Compose, in `android/`. The TIFF decoder, JPEG encoder,
+zip index and metadata writer are plain Kotlin in
+`android/app/src/main/java/com/barion/filmscans/core/`, with no Android
+dependencies, and are what the unit tests cover. GitHub Actions runs the tests,
+lint and the release build on every push; pushes to `main` publish the APK to
+the `latest` release.
 
-The signing key in `android/keystore/` is committed on purpose, so each
-sideloaded build installs over the last one. Only install APKs from this
-repo's releases.
+```
+cd android && ./gradlew :app:testDebugUnitTest :app:assembleRelease
+```
+
+## Desktop versions
+
+`labunzip/` is LabUnzip, a Windows app (Electron) that unpacks lab downloads,
+nested zips included, and sets each file's created and modified date to its
+scan date. Its right click "Fix dates" does the same for files already
+unpacked. See [labunzip/README.md](labunzip/README.md). The Android app's
+unzipping, date rules and naming come from it.
+
+`desktop/tiff2jpeg.py` is an earlier command line converter for Windows, Mac
+and Linux (`pip install -r desktop/requirements.txt`). On Windows, drag a
+folder onto `tiff2jpeg.bat`.

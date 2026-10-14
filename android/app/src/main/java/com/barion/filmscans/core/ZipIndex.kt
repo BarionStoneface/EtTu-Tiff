@@ -11,7 +11,7 @@ class ZipFormatException(msg: String) : IOException(msg)
 
 /** A byte range of another source, read in place: how a zip stored inside a zip is opened without copying it. */
 class SubSource(private val parent: ByteSource, private val start: Long, override val size: Long) : ByteSource {
-    init { require(start >= 0 && size >= 0 && start + size <= parent.size) { "range outside the file" } }
+    init { if (start < 0 || size < 0 || start + size > parent.size) throw ZipFormatException("zip is truncated") }
     override fun read(pos: Long, buf: ByteArray, off: Int, len: Int) {
         if (pos < 0 || pos + len > size) throw java.io.EOFException("read past the end")
         parent.read(start + pos, buf, off, len)
@@ -51,7 +51,8 @@ object ZipIndex {
     private const val EOCD64_LOCATOR = 0x07064b50L
     private const val CEN = 0x02014b50L
     private const val LOC = 0x04034b50L
-    private const val MAX_DIRECTORY = 512L * 1024 * 1024
+    private const val MAX_DIRECTORY = 64L * 1024 * 1024
+    private const val MAX_ENTRIES = 250_000
 
     fun read(src: ByteSource): List<ZipItem> {
         val (eocdPos, eocd) = findEocd(src)
@@ -75,9 +76,9 @@ object ZipIndex {
         // Data in front of the zip (a self-extractor, or a zip inside something else) shifts every offset.
         val shift = cdEnd - (cdOffset + cdSize)
         if (shift < 0) throw ZipFormatException("damaged zip directory")
-        if (cdSize > MAX_DIRECTORY) throw ZipFormatException("zip directory is too big")
+        if (cdSize > MAX_DIRECTORY || count > MAX_ENTRIES) throw ZipFormatException("zip directory is too big")
         val cd = bytes(src, cdOffset + shift, cdSize.toInt())
-        val out = ArrayList<ZipItem>(count.coerceAtMost(100_000).toInt())
+        val out = ArrayList<ZipItem>(count.toInt())
         var p = 0
         while (p + 46 <= cd.size && out.size < count) {
             if (u32(cd, p) != CEN) throw ZipFormatException("damaged zip directory")
@@ -138,7 +139,33 @@ object ZipIndex {
         item.unreadable?.let { throw ZipFormatException("can't unzip ${item.name.substringAfterLast('/')}: $it") }
         val start = dataStart(src, item)
         val raw = SourceStream(src, start, if (item.stored) item.size else item.compressedSize)
-        return if (item.stored) raw else Inflating(raw)
+        return Checked(if (item.stored) raw else Inflating(raw), item)
+    }
+
+    /**
+     * Holds an entry to the size and checksum its directory entry promised. A zip that inflates to
+     * more than it says (a "zip bomb", or a damaged one) would otherwise fill the phone; one that
+     * comes out short or different (a corrupt download) would be saved as if it were whole.
+     */
+    private class Checked(input: InputStream, private val item: ZipItem) : java.io.FilterInputStream(input) {
+        private var got = 0L
+        private val crc = CRC32()
+        private val short get() = item.name.substringAfterLast('/')
+        override fun read(): Int { val b = ByteArray(1); return if (read(b, 0, 1) < 0) -1 else b[0].toInt() and 0xFF }
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            if (len == 0) return 0
+            val n = `in`.read(b, off, len)
+            if (n < 0) {
+                if (got != item.size) throw ZipFormatException("$short is shorter than the zip says")
+                if (crc.value != item.crc) throw ZipFormatException("$short is damaged (checksum doesn't match)")
+                return -1
+            }
+            got += n
+            if (got > item.size) throw ZipFormatException("$short is bigger than the zip says")
+            crc.update(b, off, n)
+            return n
+        }
+        override fun skip(n: Long): Long { val b = ByteArray(minOf(n, 1L shl 16).toInt()); val r = read(b, 0, b.size); return if (r < 0) 0 else r.toLong() }
     }
 
     /** The first [limit] bytes of an entry: enough to read a scan's dates without unpacking all of it. */

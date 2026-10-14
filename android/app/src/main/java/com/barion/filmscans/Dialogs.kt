@@ -27,6 +27,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.barion.filmscans.core.Metadata
+import com.barion.filmscans.core.Names
 import java.time.LocalDate
 
 /* Questions and reports that pop up over the rolls. */
@@ -63,8 +64,8 @@ private fun dryRunLines(m: AppModel): List<DryLine> {
     for (r in m.activeRolls) {
         out += DryLine(r.name, heading = true)
         val where = when {
-            r.jpegRoll && keep -> "into a new folder, ${cleanName(r.copiesFolder)}"
-            !keep && r.renameFolder && cleanName(r.newFolderName) != r.name -> "here; the folder becomes ${cleanName(r.newFolderName)}"
+            r.jpegRoll && keep -> "into a new folder, ${Names.clean(r.copiesFolder)}"
+            !keep && r.renameFolder && Names.clean(r.newFolderName) != r.name -> "here; the folder becomes ${Names.clean(r.newFolderName)}"
             else -> "here"
         }
         out += DryLine(when {
@@ -132,7 +133,7 @@ internal fun ConfirmDialog(m: AppModel, onDismiss: () -> Unit, onGo: () -> Unit)
     val overwrites = rolls.filter { it.overwrite }.sumOf { it.replacing(m.settings.keepTiffs).size }
     val tiffs = rolls.filter { !it.jpegRoll }.sumOf { it.files.size }
     val jpegs = rolls.filter { it.jpegRoll }.sumOf { it.files.size }
-    val renames = if (replace) rolls.filter { it.renameFolder && cleanName(it.newFolderName) != it.name } else emptyList()
+    val renames = if (replace) rolls.filter { it.renameFolder && Names.clean(it.newFolderName) != it.name } else emptyList()
     val noFilm = rolls.count { it.film.isBlank() }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -150,10 +151,10 @@ internal fun ConfirmDialog(m: AppModel, onDismiss: () -> Unit, onGo: () -> Unit)
                     if (jpegs > 0) Text("$jpegs lab JPEG(s) get the new details and names in place; their old details are " +
                         "replaced. The pictures themselves aren't re-saved.")
                     if (side > 0) Text("$side info file(s) will also be deleted.")
-                    renames.forEach { Text("Folder renamed: ${it.name} → ${cleanName(it.newFolderName)}") }
+                    renames.forEach { Text("Folder renamed: ${it.name} → ${Names.clean(it.newFolderName)}") }
                 } else {
                     if (tiffs > 0) Text("The JPEGs are added next to the TIFFs.")
-                    rolls.filter { it.jpegRoll }.forEach { Text("${it.name}: tagged copies go into a new folder, ${cleanName(it.copiesFolder)}") }
+                    rolls.filter { it.jpegRoll }.forEach { Text("${it.name}: tagged copies go into a new folder, ${Names.clean(it.copiesFolder)}") }
                     Text("Nothing is deleted or renamed.")
                 }
                 if (overwrites > 0) Text("$overwrites JPEG(s) already in the folders will be replaced.")

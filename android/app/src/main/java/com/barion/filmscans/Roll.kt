@@ -126,7 +126,7 @@ class Roll(
         val replacing = replacing(keepTiffs)
         if (replacing.isNotEmpty() && !overwrite) out += "${replacing.size} JPEG(s) with these names are already in the folder"
         if (!keepTiffs && renameFolder) {
-            val n = cleanName(newFolderName)
+            val n = Names.clean(newFolderName)
             if (n.isEmpty()) out += "The new folder name is empty"
             else if (!n.equals(name, true) && n.lowercase() in siblings) out += "There's already a folder called \"$n\" next to this one"
         }
@@ -136,7 +136,7 @@ class Roll(
             if (clash != null) out += "${clash.newName}.jpg is the name another of these JPEGs has now; change the added text"
         }
         if (keepTiffs && jpegRoll) {
-            val n = cleanName(copiesFolder)
+            val n = Names.clean(copiesFolder)
             if (n.isEmpty()) out += "The folder for the tagged copies has no name"
             else if (n.equals(name, true) || n.lowercase() in siblings)
                 out += "There's already a folder called \"$n\": choose another name for the tagged copies"
@@ -162,7 +162,7 @@ class Roll(
     @Synchronized fun copiesDir(): DocumentFile {
         copiesDoc?.let { return it }
         val parent = folder.parentFile ?: error("can't make a folder next to this one")
-        val n = cleanName(copiesFolder)
+        val n = Names.clean(copiesFolder)
         val made = parent.createDirectory(n) ?: error("couldn't create the folder $n")
         copiesDoc = made
         outputUri = made.uri

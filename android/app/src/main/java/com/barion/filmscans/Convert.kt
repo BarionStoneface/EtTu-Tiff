@@ -4,9 +4,11 @@ import android.content.Context
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.DocumentsContract
+import androidx.documentfile.provider.DocumentFile
 import com.barion.filmscans.core.Credits
 import com.barion.filmscans.core.JpegRetag
 import com.barion.filmscans.core.Metadata
+import com.barion.filmscans.core.Names
 import com.barion.filmscans.core.RollMeta
 import com.barion.filmscans.core.Scan
 import com.barion.filmscans.core.TiffReader
@@ -33,9 +35,10 @@ object Convert {
                 val frame = Scan.frame(t, f.name, date, index + 1, rollName(roll, keepTiff))
                 val os = ctx.contentResolver.openOutputStream(outDoc.uri, if (existing != null) "wt" else "w")
                     ?: error("couldn't write $target")
-                BufferedOutputStream(os, 1 shl 16).use { Scan.convert(t, frame, meta, credits, it, quality, progress) }
+                val counted = Counting(BufferedOutputStream(os, 1 shl 16))
+                counted.use { Scan.convert(t, frame, meta, credits, it, quality, progress) }
+                verify(ctx, outDoc.uri, f, counted.bytes)
             }
-            verify(ctx, outDoc.uri, f)
         } catch (e: Throwable) {
             if (existing == null) runCatching { outDoc.delete() }
             throw e
@@ -49,7 +52,7 @@ object Convert {
         ?: f.date.date.takeIf { roll.useFileDates } ?: error("no scan date chosen")
 
     /** The roll's name as written into each photo: the new folder name only if the folder really gets it. */
-    private fun rollName(roll: Roll, keep: Boolean) = if (!keep && roll.renameFolder) cleanName(roll.newFolderName) else roll.name
+    private fun rollName(roll: Roll, keep: Boolean) = if (!keep && roll.renameFolder) Names.clean(roll.newFolderName) else roll.name
 
     /**
      * Tags a lab JPEG without re-saving the picture (see [JpegRetag]). Keeping the originals, the tagged
@@ -74,9 +77,10 @@ object Convert {
                 val info = JpegRetag.info(src)
                 val frame = JpegRetag.frame(info, f.name, date, index + 1, rollName(roll, keep))
                 val os = ctx.contentResolver.openOutputStream(outDoc.uri, "w") ?: error("couldn't write $target")
-                BufferedOutputStream(os, 1 shl 16).use { JpegRetag.rewrite(src, Metadata.segments(frame, meta, credits), it) }
+                val counted = Counting(BufferedOutputStream(os, 1 shl 16))
+                counted.use { JpegRetag.rewrite(src, Metadata.segments(frame, meta, credits), it) }
+                verify(ctx, outDoc.uri, f, counted.bytes)
             }
-            verify(ctx, outDoc.uri, f)
         } catch (e: Throwable) {
             runCatching { outDoc.delete() }
             throw e
@@ -92,13 +96,22 @@ object Convert {
         if (renamed != null) return FileDates.set(renamed, date)
         // This folder can't rename files: copy the tagged file to the real name instead.
         val final = dir.createFile("image/jpeg", f.newName) ?: error("tagged file left as $target.part; rename it to $target")
-        ctx.contentResolver.openInputStream(outDoc.uri)!!.use { i -> ctx.contentResolver.openOutputStream(final.uri)!!.use { i.copyTo(it, 1 shl 16) } }
-        verify(ctx, final.uri, f)
+        val copied = ctx.contentResolver.openInputStream(outDoc.uri)!!.use { i -> ctx.contentResolver.openOutputStream(final.uri)!!.use { i.copyTo(it, 1 shl 16) } }
+        verify(ctx, final.uri, f, copied)
         outDoc.delete()
         return FileDates.set(final.uri, date)
     }
 
-    private fun verify(ctx: Context, uri: Uri, f: ScanFile) {
+    private class Counting(out: java.io.OutputStream) : java.io.FilterOutputStream(out) {
+        var bytes = 0L
+        override fun write(b: Int) { out.write(b); bytes++ }
+        override fun write(b: ByteArray, off: Int, len: Int) { out.write(b, off, len); bytes += len }
+    }
+
+    /** The JPEG on disk is as long as what was written, and the phone's own decoder reads it at the right size. */
+    private fun verify(ctx: Context, uri: Uri, f: ScanFile, written: Long) {
+        val onDisk = DocumentFile.fromSingleUri(ctx, uri)?.length() ?: 0L
+        if (onDisk > 0 && onDisk != written) error("the JPEG on disk is $onDisk bytes, not the $written written")
         val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, o) }
         if (o.outWidth != f.width || o.outHeight != f.height)
@@ -114,7 +127,7 @@ object Convert {
 
     /** Returns the error, or null when renamed. */
     fun renameFolder(ctx: Context, roll: Roll): String? {
-        val newName = cleanName(roll.newFolderName)
+        val newName = Names.clean(roll.newFolderName)
         if (newName.isEmpty() || newName == roll.name) return null
         return try {
             val r = DocumentsContract.renameDocument(ctx.contentResolver, roll.folder.uri, newName)

@@ -2,16 +2,11 @@ name: Clean up
 
 # Keeps Actions storage near zero without touching repository settings:
 # every day, deletes artifacts and run logs older than a day.
-# Run by hand (or by changing this file on the branch) it also deletes every
-# artifact and the build caches straight away.
+# Run by hand it also deletes every artifact and the build caches straight away.
 on:
   schedule:
     - cron: '17 6 * * *'
   workflow_dispatch:
-  push:
-    branches: [claude/labunzip-handoff-n6rhc0]
-    paths:
-      - '.github/workflows/cleanup.yml'
 
 permissions:
   actions: write

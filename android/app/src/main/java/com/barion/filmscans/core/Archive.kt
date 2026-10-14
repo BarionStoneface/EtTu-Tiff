@@ -27,6 +27,7 @@ object Archive {
     /** Junk that zips made on a Mac or Windows carry along. */
     val JUNK = Regex("""(^|/)(__MACOSX/|\._)|(^|/)(\.DS_Store|Thumbs\.db|desktop\.ini)$""", RegexOption.IGNORE_CASE)
     const val MAX_DEPTH = 4
+    private val DRIVE = Regex("[A-Za-z]:")
 
     /**
      * The entry's path cleaned up, or null if it must not be unpacked: folders, junk, and
@@ -36,7 +37,7 @@ object Archive {
         val path = name.replace('\\', '/').trimStart('/')
         if (path.isEmpty() || path.endsWith("/") || JUNK.containsMatchIn(path)) return null
         val parts = path.split('/').filter { it.isNotEmpty() }
-        if (parts.isEmpty() || parts.any { it == ".." || it == "." } || parts[0].matches(Regex("[A-Za-z]:"))) return null
+        if (parts.isEmpty() || parts.any { it == ".." || it == "." } || DRIVE.matches(parts[0])) return null
         return parts.joinToString("/")
     }
 

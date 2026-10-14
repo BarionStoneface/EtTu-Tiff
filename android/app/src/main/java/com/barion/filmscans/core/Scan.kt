@@ -33,7 +33,7 @@ object Dates {
             runCatching { return LocalDateTime.parse(t.substring(0, n), f) }
         }
         // Date only
-        Regex("""^(\d{4})[-:](\d{2})[-:](\d{2})""").find(t)?.let { m ->
+        DATE_ONLY.find(t)?.let { m ->
             return runCatching {
                 LocalDateTime.of(m.groupValues[1].toInt(), m.groupValues[2].toInt(), m.groupValues[3].toInt(), 0, 0)
             }.getOrNull()
@@ -51,17 +51,23 @@ object Dates {
             it != LocalDateTime.of(1980, 1, 1, 0, 0)
     }
 
+    private val DATE_ONLY = Regex("""^(\d{4})[-:](\d{2})[-:](\d{2})""")
+
+    /** An XMP date, written either as an attribute or as an element. */
+    private class XmpKey(val key: String, val rank: Int) {
+        val attr = Regex("""$key\s*=\s*["']([^"']+)["']""")
+        val elem = Regex("""<$key>([^<]+)</$key>""")
+    }
     private val XMP_KEYS = listOf(
         "exif:DateTimeOriginal" to 20, "exif:DateTimeDigitized" to 21, "xmp:CreateDate" to 22,
         "photoshop:DateCreated" to 23, "xmp:MetadataDate" to 40,
-    )
+    ).map { XmpKey(it.first, it.second) }
 
     private class Ranked(val rank: Int, val found: DateFound)
 
-    private fun xmpRanked(xmp: String, prefix: String): List<Ranked> = XMP_KEYS.mapNotNull { (key, rank) ->
-        val v = Regex("""$key\s*=\s*["']([^"']+)["']""").find(xmp)?.groupValues?.get(1)
-            ?: Regex("""<$key>([^<]+)</$key>""").find(xmp)?.groupValues?.get(1)
-        usable(parse(v))?.let { Ranked(rank, DateFound(it, "$prefix$key")) }
+    private fun xmpRanked(xmp: String, prefix: String): List<Ranked> = XMP_KEYS.mapNotNull { k ->
+        val v = k.attr.find(xmp)?.groupValues?.get(1) ?: k.elem.find(xmp)?.groupValues?.get(1)
+        usable(parse(v))?.let { Ranked(k.rank, DateFound(it, "$prefix${k.key}")) }
     }
 
     /** Dates in an XMP packet, best first. */
@@ -99,7 +105,7 @@ object Dates {
         return out.sortedBy { it.rank }.map { it.found }
     }
 
-    private fun xmpRank(source: String) = XMP_KEYS.firstOrNull { source.endsWith(it.first) }?.second ?: 50
+    private fun xmpRank(source: String) = XMP_KEYS.firstOrNull { source.endsWith(it.key) }?.rank ?: 50
 
     /** Dates in a TIFF or JPEG, told apart by their first bytes. Empty if neither, or unreadable. */
     fun fromImage(src: ByteSource): List<DateFound> = runCatching {
@@ -161,7 +167,7 @@ object Scan {
         scannerMake = t.text(271),
         scannerModel = t.text(272),
         scannerSoftware = t.text(305),
-        icc = t.bytes(34675),
+        icc = t.bytes(34675)?.takeIf { it.size <= Metadata.MAX_ICC },
         frameNumber = frameNumber,
         rollName = rollName,
     )

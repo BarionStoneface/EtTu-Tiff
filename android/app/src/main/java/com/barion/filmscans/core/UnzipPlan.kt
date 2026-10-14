@@ -23,7 +23,7 @@ object UnzipPlan {
         val direct = HashMap<String, Int>()
         val bytes = HashMap<String, Long>()
         val sealedAt = HashSet<String>()
-        val all = sortedSetOf(Comparator<String> { a, b -> naturalCompare(a, b) })
+        val all = HashSet<String>()
         fun addAncestors(path: String, size: Long) {
             var p = path
             while (p.isNotEmpty()) {
@@ -36,7 +36,7 @@ object UnzipPlan {
             addAncestors(f.folder, f.size)
         }
         for (s in listing.sealed) { sealedAt += s.folder; addAncestors(s.folder, s.item.size) }
-        return all.map { p ->
+        return all.sortedWith(::naturalCompare).map { p ->
             PlanFolder(p, p.substringAfterLast('/'), p.count { it == '/' }, direct[p] ?: 0, bytes[p] ?: 0, p in sealedAt)
         }
     }
@@ -93,10 +93,12 @@ object UnzipPlan {
         return Result(targets, sealed, conflicts)
     }
 
+    private val RUNS = Regex("""\d+|\D+""")
+
     /** "Roll 2" before "Roll 10". */
     fun naturalCompare(a: String, b: String): Int {
-        val ra = Regex("""\d+|\D+""").findAll(a.lowercase()).map { it.value }.toList()
-        val rb = Regex("""\d+|\D+""").findAll(b.lowercase()).map { it.value }.toList()
+        val ra = RUNS.findAll(a.lowercase()).map { it.value }.toList()
+        val rb = RUNS.findAll(b.lowercase()).map { it.value }.toList()
         for (i in 0 until minOf(ra.size, rb.size)) {
             val x = ra[i]; val y = rb[i]
             val c = if (x[0].isDigit() && y[0].isDigit()) x.trimStart('0').length.compareTo(y.trimStart('0').length).takeIf { it != 0 }

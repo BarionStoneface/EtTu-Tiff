@@ -74,7 +74,7 @@ object Rolls {
             val scanner = listOfNotNull(info.scannerMake, info.scannerModel).joinToString(" ").ifBlank { null }
             ScanFile(doc.file, doc.name, info.width, info.height, 8, scanner, found, null, info.orientation) to info.taggedByThisApp
         }
-    } catch (e: Exception) {
+    } catch (e: Throwable) {
         ScanFile(doc.file, doc.name, 0, 0, 0, null, fileDate(ctx, doc), e.message ?: "can't read this JPEG") to false
     }
 
@@ -86,7 +86,7 @@ object Rolls {
             val scanner = listOfNotNull(t.text(271), t.text(272)).joinToString(" ").ifBlank { null }
             ScanFile(doc.file, doc.name, t.width, t.height, t.bits, scanner, found, err)
         }
-    } catch (e: Exception) {
+    } catch (e: Throwable) {
         ScanFile(doc.file, doc.name, 0, 0, 0, null, fileDate(ctx, doc), e.message ?: "can't read this TIFF")
     }
 

@@ -96,7 +96,7 @@ object Metadata {
         } else if (r.pushStops != 0) parts += r.pushLabel
         listOf(r.camera, r.lens).filter { it.isNotBlank() }.takeIf { it.isNotEmpty() }?.let { parts += it.joinToString(", ") }
         if (r.tags.isNotEmpty()) parts += r.tags.joinToString(", ")
-        if (r.notes.isNotBlank()) parts += r.notes.trim()
+        if (r.notes.isNotBlank()) parts += r.notes.trim().take(4000)
         val scanner = scannerName(f)
         val scan = listOfNotNull(scanner?.let { "Scanned on $it" }, r.lab.ifBlank { null }?.let { "at $it" })
         if (scan.isNotEmpty()) parts += scan.joinToString(" ")
@@ -293,9 +293,13 @@ object Metadata {
     private fun alt(tag: String, v: String) =
         "<$tag><rdf:Alt><rdf:li xml:lang=\"x-default\">${esc(v)}</rdf:li></rdf:Alt></$tag>"
 
-    private fun esc(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+    private fun esc(s: String) = s.replace(TiffReader.CONTROL, "")
+        .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
 
     // ------------------------------------------------------------------ ICC
+
+    /** 255 segments of 65505 bytes: the most the ICC segment counter can number. */
+    const val MAX_ICC = 255 * 65505
 
     fun iccSegments(icc: ByteArray): List<ByteArray> {
         val max = 65519 - 14
