@@ -70,6 +70,49 @@ object JpegRetag {
         return src.size
     }
 
+    /** Where the first scan starts (its SOS marker), or null if this isn't a JPEG with image data. */
+    fun imageStart(src: ByteSource): Long? {
+        val two = ByteArray(2)
+        if (src.size < 4) return null
+        src.read(0, two)
+        if (two[0] != 0xFF.toByte() || two[1] != 0xD8.toByte()) return null
+        var p = 2L
+        while (p + 4 <= src.size) {
+            src.read(p, two)
+            if (two[0] != 0xFF.toByte()) return null
+            val m = two[1].u()
+            when {
+                m == 0xFF -> { p++; continue }
+                m == SOS -> return p
+                m == 0xD9 -> return null
+                m in 0xD0..0xD7 || m == 0x01 -> { p += 2; continue }
+            }
+            src.read(p + 2, two)
+            p += 2 + ((two[0].u() shl 8) or two[1].u())
+        }
+        return null
+    }
+
+    /**
+     * Whether two JPEGs hold the same picture, byte for byte, whatever their details say: a lab JPEG
+     * that was only given a date or re-tagged is still the same picture.
+     */
+    fun sameImage(a: ByteSource, b: ByteSource): Boolean {
+        val sa = imageStart(a) ?: return false
+        val sb = imageStart(b) ?: return false
+        val n = imageEnd(a, sa) - sa
+        if (n != imageEnd(b, sb) - sb) return false
+        val ba = ByteArray(1 shl 16); val bb = ByteArray(1 shl 16)
+        var done = 0L
+        while (done < n) {
+            val k = minOf(ba.size.toLong(), n - done).toInt()
+            a.read(sa + done, ba, 0, k); b.read(sb + done, bb, 0, k)
+            for (i in 0 until k) if (ba[i] != bb[i]) return false
+            done += k
+        }
+        return true
+    }
+
     fun info(src: ByteSource): JpegInfo {
         var w = 0; var h = 0
         var exif: TiffReader? = null
