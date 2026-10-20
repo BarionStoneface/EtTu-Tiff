@@ -13,6 +13,7 @@ import com.barion.filmscans.core.Archive
 import com.barion.filmscans.core.BytesSource
 import com.barion.filmscans.core.DateFound
 import com.barion.filmscans.core.Dates
+import com.barion.filmscans.core.JpegRetag
 import com.barion.filmscans.core.Listing
 import com.barion.filmscans.core.Metadata
 import com.barion.filmscans.core.Names
@@ -188,6 +189,11 @@ object Unzip {
             dir.kids[key]?.let { old ->
                 // Size unknown (a zip read start to finish): whatever is there is kept, never overwritten.
                 if (size == null || size < 0 || old.size == size) return null
+                // A lab JPEG given its date last time differs in size but holds the same picture.
+                val same = isJpeg(name) && runCatching {
+                    UriSource.open(ctx, old.file.uri).use { a -> JpegRetag.sameImage(a, BytesSource(data.readBytes())) }
+                }.getOrDefault(false)
+                if (same) return null
                 error("a different $name is already there, so it was left alone")
             }
             dir.kids.remove("$key.part")?.file?.delete()
@@ -232,7 +238,8 @@ object Unzip {
         val base = if (top.isEmpty()) plan.dest else
             plan.dest.findFile(top)?.takeIf { it.isDirectory } ?: plan.dest.createDirectory(top) ?: error("couldn't create the folder $top")
         out.tops += base
-        val writer = Writer(ctx, base, canRename(ctx, base), cancelled)
+        // The plan's folders already start with the top folder, so writing starts from the destination.
+        val writer = Writer(ctx, plan.dest, canRename(ctx, base), cancelled)
         var done = 0L
 
         fun one(dirSegs: List<String>, name: String, size: Long?, time: LocalDateTime?, label: String, open: () -> InputStream) {
@@ -279,7 +286,7 @@ object Unzip {
         if (result == null || src == null) {
             // Can't be read directly (e.g. a cloud file): unzip everything, in order, with no preview.
             val input = ctx.contentResolver.openInputStream(plan.uri) ?: error("couldn't open ${plan.zipName}")
-            input.buffered(1 shl 20).use { streamZip(it, emptyList(), plan.zipName) }
+            input.buffered(1 shl 20).use { streamZip(it, listOfNotNull(top.ifEmpty { null }), plan.zipName) }
             return
         }
         for (t in result.targets.sortedBy { it.file.item.localHeaderOffset }) {

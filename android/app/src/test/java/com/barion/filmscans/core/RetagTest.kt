@@ -106,6 +106,16 @@ class RetagTest {
         assertEquals(j.size.toLong(), JpegRetag.imageEnd(BytesSource(withTrailer), sosOffset(j).toLong()))
     }
 
+    @Test fun samePictureWhateverTheDetails() {
+        val lab = labJpeg()
+        val out = ByteArrayOutputStream()
+        JpegRetag.rewrite(BytesSource(lab), emptyList(), out)
+        assertEquals(sosOffset(lab).toLong(), JpegRetag.imageStart(BytesSource(lab)))
+        assertTrue(JpegRetag.sameImage(BytesSource(lab), BytesSource(out.toByteArray())))
+        assertFalse(JpegRetag.sameImage(BytesSource(lab), BytesSource(labJpeg(40, 26))))
+        assertFalse(JpegRetag.sameImage(BytesSource(lab), BytesSource(ByteArray(100))))
+    }
+
     @Test fun notAJpeg() {
         assertTrue(runCatching { JpegRetag.info(BytesSource(ByteArray(100))) }.isFailure)
         assertTrue(runCatching { JpegRetag.rewrite(BytesSource(ByteArray(100)), emptyList(), ByteArrayOutputStream()) }.isFailure)

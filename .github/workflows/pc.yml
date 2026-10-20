@@ -1,0 +1,78 @@
+name: PC app
+
+# Tests the PC version and builds its Windows installer. Only main publishes it, to the
+# "pc-latest" release; other branches just check that it builds.
+on:
+  push:
+    paths:
+      - 'pc/**'
+      - 'android/app/src/main/java/com/barion/filmscans/core/**'
+      - 'android/app/src/test/**'
+      - '.github/workflows/pc.yml'
+  pull_request:
+    paths:
+      - 'pc/**'
+      - 'android/app/src/main/java/com/barion/filmscans/core/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pc-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Tests and compile
+        run: ./android/gradlew -p pc --stacktrace test compileKotlin
+
+  windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build the installer
+        shell: bash
+        env:
+          APP_VERSION: 1.0.${{ github.run_number }}
+        run: |
+          ./android/gradlew -p pc --stacktrace createDistributable packageMsi
+          cp pc/build/compose/binaries/main/msi/*.msi "EtTuTiff-PC-${{ github.run_number }}.msi"
+      - name: Self-check the built app
+        shell: bash
+        run: |
+          mkdir -p check/Roll1
+          cp android/app/src/test/resources/tiff/rgb_u8_strips.tif check/Roll1/000001.tif
+          cp android/app/src/test/resources/tiff/rgb_u16_lzw_pred2_tiled.tif check/Roll1/000002.tif
+          python -c "import zipfile; z=zipfile.ZipFile('check/Order.zip','w'); z.write('check/Roll1/000001.tif','Tiffs/Roll 1/000001.tif'); z.close()"
+          timeout 300 "pc/build/compose/binaries/main/app/Et Tu Tiff/Et Tu Tiff.exe" --self-check "$PWD/check/Roll1" "$PWD/check/Order.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pc-installer
+          path: EtTuTiff-PC-*.msi
+          retention-days: 1
+      - name: Publish to the pc-latest release
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete pc-latest --yes --cleanup-tag || true
+          gh release create pc-latest "EtTuTiff-PC-${{ github.run_number }}.msi" \
+            --target "${{ github.sha }}" --latest=false \
+            --title "Et Tu, Tiff? for Windows, build ${{ github.run_number }}" \
+            --notes "Windows 10 or 11. Installs for your Windows account only, no administrator needed. Built from ${{ github.sha }}."
