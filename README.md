@@ -20,6 +20,22 @@ a long job starts, is to show notifications, so you can see an unzip or a
 conversion carry on while you're in other apps. It works the same if you say
 no.
 
+**On Windows:** download the `.msi` from
+[the Windows release](../../releases/tag/pc-latest) and open it. It installs
+for your Windows account only, with no administrator needed, and adds a Start
+menu entry and a desktop shortcut. Windows may warn that it doesn't recognise
+the program, because the installer isn't signed; "More info", then "Run
+anyway" carries on. It does the same as the phone app, plus:
+
+- Each file's created date is set to the scan date as well as its modified
+  date, which the phone can't do.
+- Folders and zips can be dragged onto the window, and Settings can add
+  "Open in Et Tu, Tiff?" and "Unzip with Et Tu, Tiff?" to Explorer's
+  right-click menu.
+- "Fix file dates in a folder" sets every photo's file dates from the date
+  inside it, for photos copied over from the phone.
+- Deleted TIFFs, info files and zips go to the Recycle Bin.
+
 ## What it does
 
 - **Converts at full quality.** It uses JPEG quality 100 with colour kept at
@@ -105,16 +121,20 @@ fields, which ExifTool and film-metadata tools can read.
 
 ## Desktop versions
 
-`labunzip/` is LabUnzip, a Windows app that unpacks lab downloads (nested
-zips included) and gives every file its scan date as both its created and
-modified date. It adds a right-click "Unpack with LabUnzip" for zips. See
-[labunzip/README.md](labunzip/README.md). The Android app's unzipping, date
-rules and naming come from it.
+`pc/` is the Windows version (see Get it above). Its screens are the phone
+app's, adapted for a window. The TIFF reader, JPEG writer, metadata, zip
+reading, dates and naming are the phone app's own files in
+`android/app/src/main/java/com/barion/filmscans/core/`, compiled into both, so
+a fix there reaches both apps.
 
+`labunzip/` is LabUnzip, the earlier Windows unpacker the unzipping, date
+rules and naming came from. The Windows version does all it did. See
+[labunzip/README.md](labunzip/README.md).
 
-`desktop/tiff2jpeg.py` is an earlier command-line version for Windows, Mac
+`desktop/tiff2jpeg.py` is an earlier command-line converter for Windows, Mac
 and Linux (`pip install -r desktop/requirements.txt`). On Windows you can
-drag a folder onto `tiff2jpeg.bat`.
+drag a folder onto `tiff2jpeg.bat`. Unlike the apps, it always deletes the
+TIFFs and info files.
 
 ## Building
 
@@ -126,3 +146,8 @@ TIFF decoder, JPEG encoder and metadata writer are plain Kotlin in
 The signing key in `android/keystore/` is committed on purpose, so each
 sideloaded build installs over the last one. Only install APKs from this
 repo's releases.
+
+The Windows version is Kotlin with Compose for Desktop, in `pc/`
+(`android/gradlew -p pc test` runs its tests and the shared core's). Its
+workflow builds the installer on a Windows runner and publishes it from
+`main` to the `pc-latest` release.

@@ -1,5 +1,9 @@
 # LabUnzip
 
+> Et Tu, Tiff? for Windows (`pc/`, installer on the `pc-latest` release) now
+> does everything LabUnzip does, plus converting and tagging. LabUnzip is kept
+> as it was.
+
 Unpacks the zips from film labs in one pass, including the zips nested inside
 them, and fixes the dates on the way out.
 
