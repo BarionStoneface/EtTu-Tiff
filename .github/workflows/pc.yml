@@ -50,8 +50,16 @@ jobs:
         env:
           APP_VERSION: 1.0.${{ github.run_number }}
         run: |
-          ./android/gradlew -p pc --stacktrace packageMsi
+          ./android/gradlew -p pc --stacktrace createDistributable packageMsi
           cp pc/build/compose/binaries/main/msi/*.msi "EtTuTiff-PC-${{ github.run_number }}.msi"
+      - name: Self-check the built app
+        shell: bash
+        run: |
+          mkdir -p check/Roll1
+          cp android/app/src/test/resources/tiff/rgb_u8_strips.tif check/Roll1/000001.tif
+          cp android/app/src/test/resources/tiff/rgb_u16_lzw_pred2_tiled.tif check/Roll1/000002.tif
+          python -c "import zipfile; z=zipfile.ZipFile('check/Order.zip','w'); z.write('check/Roll1/000001.tif','Tiffs/Roll 1/000001.tif'); z.close()"
+          timeout 300 "pc/build/compose/binaries/main/app/Et Tu Tiff/Et Tu Tiff.exe" --self-check "$PWD/check/Roll1" "$PWD/check/Order.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: pc-installer

@@ -6,6 +6,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -26,17 +27,25 @@ import java.io.File
 import javax.imageio.ImageIO
 import javax.swing.JFileChooser
 import javax.swing.UIManager
+import kotlin.system.exitProcess
+import kotlinx.coroutines.delay
 
 fun main(args: Array<String>) {
+    // "--self-check <folder or zip>…": opens each, lets the screen draw, and exits; any error fails it.
+    // The Windows build runs this on the app it just built.
+    val selfCheck = args.firstOrNull() == "--self-check"
+    val paths = args.filter { it != "--self-check" }.map(::File)
+    if (selfCheck) Thread.setDefaultUncaughtExceptionHandler { _, e -> e.printStackTrace(); exitProcess(1) }
     ImageIoJpeg.install()
     // The folder chooser looks like the rest of Windows.
     runCatching { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) }
     val m = AppModel()
     // Started from Explorer's right-click menu, or with a folder or zip dropped on the shortcut.
-    if (args.isNotEmpty()) m.openPaths(args.map(::File))
+    if (paths.isNotEmpty() && !selfCheck) m.openPaths(paths)
     val icon = runCatching {
         BitmapPainter(ImageIO.read(AppModel::class.java.getResourceAsStream("/icon.png")).toComposeImageBitmap())
     }.getOrNull()
+    if (selfCheck && icon == null) { System.err.println("self-check: no icon"); exitProcess(3) }
 
     application {
         val state = rememberWindowState(width = 1040.dp, height = 880.dp)
@@ -56,6 +65,16 @@ fun main(args: Array<String>) {
                     }
                 }
                 onDispose { window.contentPane.dropTarget = null }
+            }
+            if (selfCheck) LaunchedEffect(Unit) {
+                for (p in paths) {
+                    m.openPaths(listOf(p))
+                    while (m.busy) delay(100)
+                    delay(2000)
+                    println("self-check ${p.name}: ${m.phase}, ${m.rolls.size} roll(s), ${m.plans.size} zip(s) ${m.status}")
+                    if (m.phase != Phase.Ready && m.phase != Phase.Plan) exitProcess(2)
+                }
+                exitProcess(0)
             }
             val pick = Pickers(window, m.settings)
             MaterialTheme(colorScheme = m.settings.theme.colors) {
