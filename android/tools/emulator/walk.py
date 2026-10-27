@@ -198,7 +198,8 @@ def crashes_since_clear():
     out = adb("logcat", "-d", "-b", "crash", timeout=60)
     main = adb("logcat", "-d", "-s", "AndroidRuntime:E", "ActivityManager:E", timeout=60)
     found = []
-    if PKG in out:
+    # Any app's crash counts: the phone's own apps can crash on what this app hands them.
+    if "FATAL EXCEPTION" in out or PKG in out:
         found.append(out[-6000:])
     for m in re.finditer(r"ANR in " + re.escape(PKG) + r".*", main):
         found.append(m.group(0))
@@ -208,7 +209,7 @@ def crashes_since_clear():
 def check_crashes():
     for c in crashes_since_clear():
         note("CRASH or ANR:\n```\n" + c.strip()[:5000] + "\n```")
-    adb("logcat", "-b", "all", "-c")
+    adb("logcat", "-b", "crash", "-c")
 
 
 def launch(cold=True):
@@ -280,6 +281,15 @@ def picker_open_path(*folders):
             if find("^" + re.escape(f) + "$", timeout=2) is None or find(r"Can.t use this folder|^FILES ON|^Files on", timeout=1) is None:
                 break
             n = find("^" + re.escape(f) + "$", timeout=2) or n
+        else:
+            # Android 11's picker sometimes ignores taps in its grid: switch to the list and try again.
+            lv = find(r"^List view$", timeout=2)
+            if lv:
+                tap(lv)
+                n = find("^" + re.escape(f) + "$", timeout=3)
+                if n:
+                    tap(n)
+                    time.sleep(1.5)
         shot("picker-" + f)
 
 
@@ -438,11 +448,11 @@ def s_unzip_and_replace():
         tap(n)
     time.sleep(2)
     shot("dest-picker")
-    n = find(r"^Pictures$", timeout=4)
-    if find(r"^(USE THIS FOLDER|Use this folder|SELECT|Select)$", timeout=4) is None:
-        picker_go_to_storage()
-        picker_open_path("Pictures")
-    picker_use_folder()
+    if find(r"Nothing is written until you press Unzip", timeout=3) is None:
+        if find(r"^(USE THIS FOLDER|Use this folder|SELECT|Select)$", timeout=4) is None:
+            picker_go_to_storage()
+            picker_open_path("Pictures")
+        picker_use_folder()
     wait_for(r"Nothing is written until you press Unzip", 3, "for the unzip preview")
     shot("plan")
     audit("unzip preview")
