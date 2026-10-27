@@ -1,0 +1,92 @@
+name: Emulator walk
+
+# Installs the release build on emulators from Android 8 to 16 and drives every flow:
+# picking folders, converting, unzipping, convert and delete, background progress,
+# rotation, largest text, dark mode, process death and random tapping.
+# Screenshots and a report per Android version are kept as the run's artifacts.
+on:
+  push:
+    branches-ignore: [main]
+    paths:
+      - 'android/**'
+      - '.github/workflows/emulator.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: emulator-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build release APK
+        working-directory: android
+        run: ./gradlew --stacktrace :app:assembleRelease
+      - name: Make test scans
+        run: |
+          pip install numpy tifffile pillow
+          python3 android/tools/emulator/make_fixtures.py fixtures
+      - uses: actions/upload-artifact@v4
+        with:
+          name: walk-input
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            fixtures
+          retention-days: 3
+
+  walk:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { api: 26, arch: x86, target: google_apis }
+          - { api: 30, arch: x86_64, target: google_apis }
+          - { api: 34, arch: x86_64, target: google_apis }
+          - { api: 35, arch: x86_64, target: google_apis }
+          - { api: 36, arch: x86_64, target: google_apis }
+          - { api: 36, arch: x86_64, target: google_apis_ps16k }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: walk-input
+          path: input
+      - name: Gather inputs
+        run: |
+          find input -name app-release.apk -exec cp {} app-release.apk \;
+          mv input/fixtures fixtures
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Walk the app
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          API: ${{ matrix.api }}${{ matrix.target == 'google_apis_ps16k' && '-16k' || '' }}
+        with:
+          api-level: ${{ matrix.api }}
+          arch: ${{ matrix.arch }}
+          target: ${{ matrix.target }}
+          profile: pixel_6
+          ram-size: 4096M
+          disk-size: 6000M
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: bash android/tools/emulator/run.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: walk-api-${{ matrix.api }}-${{ matrix.target }}
+          path: walk-out
+          retention-days: 14
