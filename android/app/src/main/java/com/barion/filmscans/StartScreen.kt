@@ -33,10 +33,11 @@ internal fun StartScreen(m: AppModel, pick: () -> Unit, unzip: () -> Unit) {
         Button(onClick = pick, modifier = Modifier.fillMaxWidth()) { Text("Choose scans folder") }
         Text("Pick a folder holding one roll, or a folder of roll folders. Zips in it can be unzipped from there.",
             style = MaterialTheme.typography.bodySmall)
-        OutlinedButton(onClick = unzip, modifier = Modifier.fillMaxWidth()) { Text("Unzip a download (.zip)") }
-        Text("Pick the zip (zips inside it are handled too), then the folder the rolls should go in, e.g. " +
-            "Pictures. Android doesn't let apps save into the Download folder itself. You'll see everything " +
-            "that's in it, and can rename or leave out folders, before anything is written.",
+        OutlinedButton(onClick = unzip, modifier = Modifier.fillMaxWidth()) { Text("Unzip a zip") }
+        Text("Any zip, not only lab downloads. Zips inside it are unpacked too, and a password-protected one asks " +
+            "for its password. Pick the zip, then the folder it should go in, e.g. Pictures or Documents. Android " +
+            "doesn't let apps save into the Download folder itself. You'll see everything that's in it, and can " +
+            "rename or leave out folders, before anything is written.",
             style = MaterialTheme.typography.bodySmall)
         DeleteZipsSwitch(m)
         if (m.status.isNotEmpty()) Text(m.status, color = MaterialTheme.colorScheme.error)

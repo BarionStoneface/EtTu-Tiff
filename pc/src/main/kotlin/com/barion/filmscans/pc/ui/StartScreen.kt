@@ -40,10 +40,11 @@ internal fun StartScreen(m: AppModel, pick: Pickers) {
             style = MaterialTheme.typography.bodySmall)
 
         OutlinedButton(onClick = { pick.zips().takeIf { it.isNotEmpty() }?.let { m.makePlans(it) } }, modifier = Modifier.fillMaxWidth()) {
-            Text("Unzip a download (.zip)")
+            Text("Unzip a zip")
         }
-        Text("Zips inside it are handled too. It unzips next to the zip unless you choose another folder, and you'll " +
-            "see everything that's in it, and can rename or leave out folders, before anything is written.",
+        Text("Any zip, not only lab downloads. Zips inside it are unpacked too, and a password-protected one asks for " +
+            "its password. It unzips next to the zip unless you choose another folder, and you'll see everything " +
+            "that's in it, and can rename or leave out folders, before anything is written.",
             style = MaterialTheme.typography.bodySmall)
         DeleteZipsSwitch(m)
 

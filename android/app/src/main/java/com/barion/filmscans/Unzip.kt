@@ -75,8 +75,21 @@ class ZipPlan(
     val source: UriSource?,
     val listing: Listing?,
     val delete: () -> Boolean,
+    /** The "date the lab's JPEGs" setting, which applies to photo zips. */
+    datesForPhotoZips: Boolean,
 ) {
     val folders: List<PlanFolder> = listing?.let { UnzipPlan.folders(it) } ?: emptyList()
+    /**
+     * Mostly scans or photos, like a lab download, rather than any other zip. One that can't be
+     * read ahead is taken for a photo zip, as cloud downloads from labs are the usual case.
+     */
+    val photo: Boolean = listing == null || listing.files.count { isImage(it.name) }.let { it > 0 && it * 2 >= listing.files.size }
+    /** Give JPEGs with no date taken their scan date. Starts on only for photo zips; any other zip is left exactly as it is. */
+    var dateJpegs by mutableStateOf(datesForPhotoZips && photo)
+    /** Locked files in it need a password, asked for before unzipping. */
+    val needsPassword get() = listing?.needsPassword == true
+    var password by mutableStateOf("")
+    var passwordWrong by mutableStateOf(false)
     /** Per folder: where the scan dates come from (label to count), and how many images have none. */
     val dateSummary = HashMap<String, Pair<Map<String, Int>, Int>>()
 
@@ -113,16 +126,18 @@ object Unzip {
 
     /** Reads what's in the zip and where each scan's date will come from. Writes nothing. */
     fun plan(ctx: Context, uri: Uri, name: String, size: Long, dest: DocumentFile, delete: () -> Boolean,
-             onProgress: (String) -> Unit): ZipPlan {
-        val src = UriSource.openSeekable(ctx, uri) ?: return ZipPlan(uri, name, size, dest, null, null, delete)
+             datesForPhotoZips: Boolean, onProgress: (String) -> Unit): ZipPlan {
+        val src = UriSource.openSeekable(ctx, uri) ?: return ZipPlan(uri, name, size, dest, null, null, delete, datesForPhotoZips)
         val listing = try {
             Archive.list(src)
         } catch (e: Exception) {
             src.close()
             throw IllegalStateException("$name isn't a zip this app can read (${e.message})")
         }
-        val plan = ZipPlan(uri, name, size, dest, src, listing, delete)
-        val byFolder = listing.files.filter { isImage(it.name) }.groupBy { it.folder }
+        val plan = ZipPlan(uri, name, size, dest, src, listing, delete, datesForPhotoZips)
+        // Where scan dates come from only matters for photo zips; locked files can't be read until the password is in.
+        if (!plan.photo) return plan
+        val byFolder = listing.files.filter { isImage(it.name) && !it.item.encrypted }.groupBy { it.folder }
         var n = 0
         for ((folder, files) in byFolder) {
             val counts = HashMap<String, Int>()
@@ -230,10 +245,13 @@ object Unzip {
 
     /**
      * Carries out [plan] (or, for a zip that can't be read directly, unzips all of it as it streams).
-     * With [labJpegDates], a JPEG with no EXIF date taken gets one: its own XMP date if it has one,
-     * otherwise its date in the zip. Galleries sort by this; the file's own date is set too where the phone allows.
+     * With the plan's [ZipPlan.dateJpegs], a JPEG with no EXIF date taken gets one: its own XMP date if
+     * it has one, otherwise its date in the zip. Galleries sort by this; every file's own date is set
+     * to its date in the zip too, where the phone allows.
      */
-    fun run(ctx: Context, plan: ZipPlan, labJpegDates: Boolean, out: Outcome, cancelled: () -> Boolean, onBytes: (Long) -> Unit) {
+    fun run(ctx: Context, plan: ZipPlan, out: Outcome, cancelled: () -> Boolean, onBytes: (Long) -> Unit) {
+        val labJpegDates = plan.dateJpegs
+        val password = plan.password.ifEmpty { null }
         val top = Names.clean(plan.top)
         val base = if (top.isEmpty()) plan.dest else
             plan.dest.findFile(top)?.takeIf { it.isDirectory } ?: plan.dest.createDirectory(top) ?: error("couldn't create the folder $top")
@@ -273,7 +291,7 @@ object Unzip {
         }
 
         fun streamZip(input: InputStream, into: List<String>, label: String) {
-            ZipWalk.walk(input) { path, data, millis ->
+            ZipWalk.walk(input, password) { path, data, millis ->
                 if (cancelled()) throw Cancelled()
                 val segs = path.split('/').map { Names.clean(it).ifEmpty { "_" } }
                 val time = if (millis > 0) LocalDateTime.ofInstant(Instant.ofEpochMilli(millis), ZoneId.systemDefault()) else null
@@ -291,12 +309,12 @@ object Unzip {
         }
         for (t in result.targets.sortedBy { it.file.item.localHeaderOffset }) {
             if (cancelled()) throw Cancelled()
-            one(t.dir, t.name, t.file.size, t.file.item.time, t.file.path) { ZipIndex.open(t.file.container, t.file.item) }
+            one(t.dir, t.name, t.file.size, t.file.item.time, t.file.path) { ZipIndex.open(t.file.container, t.file.item, password) }
         }
         for (s in result.sealed) {
             if (cancelled()) throw Cancelled()
             try {
-                ZipIndex.open(s.zip.container, s.zip.item).buffered(1 shl 20).use { streamZip(it, s.dir, s.zip.folder) }
+                ZipIndex.open(s.zip.container, s.zip.item, password).buffered(1 shl 20).use { streamZip(it, s.dir, s.zip.folder) }
             } catch (e: Cancelled) {
                 throw e
             } catch (e: Exception) {

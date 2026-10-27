@@ -54,10 +54,10 @@ fun App(m: AppModel, pick: Pickers) {
             settings -> { m.settings.save(); settings = false }
             m.phase == Phase.Ready -> leave = true
             m.phase == Phase.Plan -> m.leavePlan()
-            m.phase == Phase.Done || m.phase == Phase.FixReady || m.phase == Phase.FixDone -> m.reset()
+            m.phase == Phase.Done || m.phase == Phase.Unzipped || m.phase == Phase.FixReady || m.phase == Phase.FixDone -> m.reset()
         }
     }
-    val canGoBack = settings || m.phase in setOf(Phase.Ready, Phase.Plan, Phase.Done, Phase.FixReady, Phase.FixDone)
+    val canGoBack = settings || m.phase in setOf(Phase.Ready, Phase.Plan, Phase.Done, Phase.Unzipped, Phase.FixReady, Phase.FixDone)
 
     Scaffold(
         topBar = {
@@ -90,8 +90,9 @@ fun App(m: AppModel, pick: Pickers) {
                 val files by remember { derivedStateOf { m.plans.sumOf { p -> p.build().targets.size } } }
                 val bytes by remember { derivedStateOf { m.plans.sumOf { p -> p.build().bytes } } }
                 BottomButton(
-                    onClick = { m.startUnzip() }, enabled = problems.isEmpty(),
+                    onClick = { m.startUnzip() }, enabled = problems.isEmpty() && !m.checkingPasswords,
                     text = when {
+                        m.checkingPasswords -> "Checking the password…"
                         problems.isNotEmpty() -> "Fix the issues marked in red"
                         files == 0 -> "Unzip (${sizeText(bytes)})"
                         else -> "Unzip $files file(s) · ${sizeText(bytes)}"
@@ -121,6 +122,7 @@ fun App(m: AppModel, pick: Pickers) {
                     m.phase == Phase.Planning -> Busy("Reading the zip…", m.status)
                     m.phase == Phase.Plan -> PlanScreen(m, pick)
                     m.phase == Phase.Unzipping -> UnzipScreen(m)
+                    m.phase == Phase.Unzipped -> UnzippedScreen(m)
                     m.phase == Phase.Ready -> RollList(m)
                     m.phase == Phase.Converting -> ProgressScreen(m)
                     m.phase == Phase.Done -> DoneScreen(m)

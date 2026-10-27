@@ -96,3 +96,41 @@ internal fun DoneScreen(m: AppModel) {
         if (details) items(m.log.toList()) { line -> Text(line, style = MaterialTheme.typography.bodySmall) }
     }
 }
+
+/** After unzipping a zip that isn't photos: what it gave and where, with a way to look. */
+@Composable
+internal fun UnzippedScreen(m: AppModel) {
+    val ctx = LocalContext.current
+    var details by remember { mutableStateOf(false) }
+    val files = m.unzippedZips.sumOf { it.written + it.already }
+    val problems = m.unzippedZips.sumOf { it.problems }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item {
+            Text(if (problems == 0) "Unzipped — $files file(s)." else "Unzipped — $files file(s), $problems problem(s).",
+                style = MaterialTheme.typography.headlineSmall)
+            if (problems > 0) Text("The details below say which files and why.", style = MaterialTheme.typography.bodySmall)
+            m.log.firstOrNull { it.trimStart().startsWith("File dates") || it.trimStart().startsWith("This phone doesn't let") }?.let {
+                Text(it.trim(), style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        items(m.unzippedZips) { z ->
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(z.zipName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(listOfNotNull(
+                        "${z.written} file(s) in ${Places.label(z.folder)}",
+                        z.already.takeIf { it > 0 }?.let { "$it already there" },
+                    ).joinToString(" · "), style = MaterialTheme.typography.bodySmall)
+                    OutlinedButton(onClick = { Places.openFolder(ctx, z.folder) }) { Text("Open folder") }
+                }
+            }
+        }
+        item {
+            Button(onClick = { m.reset() }, modifier = Modifier.fillMaxWidth()) { Text("Back to home") }
+        }
+        item {
+            TextButton(onClick = { details = !details }) { Text(if (details) "Hide details" else "Show details (${m.log.size})") }
+        }
+        if (details) items(m.log.toList()) { line -> Text(line, style = MaterialTheme.typography.bodySmall) }
+    }
+}

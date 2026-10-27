@@ -26,6 +26,8 @@ class ZipContents(val zip: File, private val source: FileSource, val listing: Li
     /** Per folder: where the scan dates come from (label to count), and how many images have none. */
     val dateSummary = HashMap<String, Pair<Map<String, Int>, Int>>()
     val hasJpegs get() = listing.files.any { isJpeg(it.name) }
+    /** Mostly scans or photos, like a lab download, rather than any other zip. */
+    val photo: Boolean = listing.files.count { isImage(it.name) }.let { it > 0 && it * 2 >= listing.files.size }
     override fun close() = source.close()
 }
 
@@ -57,7 +59,9 @@ object Unzip {
             throw IllegalStateException("${zip.name} isn't a zip this app can read (${e.message})")
         }
         val c = ZipContents(zip, src, listing)
-        val byFolder = listing.files.filter { isImage(it.name) }.groupBy { it.folder }
+        // Where scan dates come from only matters for photo zips; locked files can't be read until the password is in.
+        if (!c.photo) return c
+        val byFolder = listing.files.filter { isImage(it.name) && !it.item.encrypted }.groupBy { it.folder }
         val all = byFolder.values.sumOf { it.size }
         var n = 0
         for ((folder, files) in byFolder) {
@@ -80,11 +84,12 @@ object Unzip {
     /**
      * Carries out [plan] into [dest]. Each file is written as name.part and renamed once complete, so
      * stopping is safe and running it again carries on. A file already there with the same size is
-     * left alone. Every file's created and modified dates become its scan date. With [labJpegDates],
-     * a JPEG with no EXIF date taken gets one: its own XMP date if it has one, otherwise its date in the zip.
+     * left alone. Every file's created and modified dates become its date in the zip (a photo's, its scan
+     * date). With [labJpegDates], a JPEG with no EXIF date taken gets one: its own XMP date if it has one,
+     * otherwise its date in the zip. Locked files need [password].
      */
     fun run(plan: UnzipPlan.Result, dest: File, labJpegDates: Boolean, out: Outcome,
-            cancelled: () -> Boolean = { false }, onBytes: (Long) -> Unit = {}) {
+            cancelled: () -> Boolean = { false }, password: String? = null, onBytes: (Long) -> Unit = {}) {
         var done = 0L
 
         fun one(dirSegs: List<String>, name: String, size: Long?, time: LocalDateTime?, label: String, open: () -> InputStream) {
@@ -144,7 +149,7 @@ object Unzip {
         }
 
         fun streamZip(input: InputStream, into: List<String>, label: String) {
-            ZipWalk.walk(input) { path, data, millis ->
+            ZipWalk.walk(input, password) { path, data, millis ->
                 if (cancelled()) throw Cancelled()
                 val segs = path.split('/').map { Names.clean(it).ifEmpty { "_" } }
                 val time = if (millis > 0) LocalDateTime.ofInstant(Instant.ofEpochMilli(millis), ZoneId.systemDefault()) else null
@@ -154,12 +159,12 @@ object Unzip {
 
         for (t in plan.targets.sortedBy { it.file.item.localHeaderOffset }) {
             if (cancelled()) throw Cancelled()
-            one(t.dir, t.name, t.file.size, t.file.item.time, t.file.path) { ZipIndex.open(t.file.container, t.file.item) }
+            one(t.dir, t.name, t.file.size, t.file.item.time, t.file.path) { ZipIndex.open(t.file.container, t.file.item, password) }
         }
         for (s in plan.sealed) {
             if (cancelled()) throw Cancelled()
             try {
-                ZipIndex.open(s.zip.container, s.zip.item).buffered(1 shl 20).use { streamZip(it, s.dir, s.zip.folder) }
+                ZipIndex.open(s.zip.container, s.zip.item, password).buffered(1 shl 20).use { streamZip(it, s.dir, s.zip.folder) }
             } catch (e: Cancelled) {
                 throw e
             } catch (e: Exception) {

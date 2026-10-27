@@ -107,10 +107,17 @@ object ZipCrypt {
 
     // ---- WinZip AES
 
-    /** AES in counter mode as WinZip uses it: a little-endian counter starting at 1. */
+    /**
+     * AES in counter mode as WinZip uses it: a little-endian counter starting at 1, which Java's own
+     * counter mode (big-endian) can't do. Each counter block is encrypted on its own through CBC with
+     * a zero start: feeding it the counter mixed with the previous output undoes the chaining, so
+     * every output is plain AES of its counter.
+     */
     class Ctr(key: ByteArray) {
-        private val cipher = Cipher.getInstance("AES/ECB/NoPadding").apply { init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES")) }
+        private val cipher = Cipher.getInstance("AES/CBC/NoPadding")
+            .apply { init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), javax.crypto.spec.IvParameterSpec(ByteArray(16))) }
         private val counter = ByteArray(16)
+        private val input = ByteArray(16)
         private val stream = ByteArray(16)
         private var used = 16
         fun apply(b: ByteArray, off: Int, len: Int) {
@@ -118,7 +125,8 @@ object ZipCrypt {
                 if (used == 16) {
                     var j = 0
                     while (j < 16) { counter[j]++; if (counter[j].toInt() != 0) break; j++ }
-                    cipher.doFinal(counter, 0, 16, stream, 0)
+                    for (k in 0 until 16) input[k] = (counter[k].toInt() xor stream[k].toInt()).toByte()
+                    cipher.update(input, 0, 16, stream, 0)
                     used = 0
                 }
                 b[i] = (b[i].toInt() xor stream[used++].toInt()).toByte()

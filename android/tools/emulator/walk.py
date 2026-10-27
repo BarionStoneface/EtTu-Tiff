@@ -323,8 +323,8 @@ def s_cold_start():
     shot("start")
     audit("start screen")
     # Can every control on the first screen be reached?
-    if not scroll_to(r"Unzip a download", tries=4):
-        note("'Unzip a download' can't be reached on the start screen")
+    if not scroll_to(r"^Unzip a zip$", tries=4):
+        note("'Unzip a zip' can't be reached on the start screen")
 
 
 def s_settings():
@@ -432,16 +432,17 @@ def s_convert_keep():
         key("KEYCODE_BACK")
 
 
-def s_unzip_and_replace():
+def pick_zip(name):
+    """From the start screen to the unzip preview of Download/[name], unzipping into Pictures."""
     launch()
     if find(r"^Back to home$", timeout=2):
         tap_text(r"^Back to home$")
-    tap_text(r"^Unzip a download")
+    tap_text(r"^Unzip a zip$")
     time.sleep(2)
     shot("zip-picker")
     picker_go_to_storage()
     picker_open_path("Download")
-    tap_text(r"^lab\.zip$")
+    tap_text("^" + re.escape(name) + "$")
     # Some pickers need a confirm for multiple selection.
     n = find(r"^(SELECT|Select|OPEN|Open)$", timeout=3)
     if n and n.pkg != PKG:
@@ -454,6 +455,19 @@ def s_unzip_and_replace():
             picker_open_path("Pictures")
         picker_use_folder()
     wait_for(r"Nothing is written until you press Unzip", 3, "for the unzip preview")
+
+
+def unzip_button():
+    for _ in range(3):
+        btn = find(r"^Unzip (\d+ file|\()|^Checking the password|^Fix the issues", timeout=3)
+        if btn:
+            return btn
+        key("KEYCODE_BACK")  # keyboard may be up
+    raise Stuck(f"Unzip button not found on the preview. Showing: {describe()}")
+
+
+def s_unzip_and_replace():
+    pick_zip("lab.zip")
     shot("plan")
     audit("unzip preview")
     btn = None
@@ -495,6 +509,57 @@ def s_unzip_and_replace():
     tap_text(r"^Back to home$")
 
 
+def s_unzip_any():
+    """A zip that isn't photos, locked with a password: a wrong one first, then the right one."""
+    pick_zip("docs.zip")
+    shot("plan")
+    audit("unzip preview, locked zip")
+    if find(r"type its password", timeout=3) is None:
+        note("a password-protected zip didn't ask for its password")
+    field = find(r"^Password$", timeout=5)
+    if field is None:
+        raise Stuck(f"no password field. Showing: {describe()}")
+    tap(field)
+    type_text("wrongpass")
+    key("KEYCODE_BACK")
+    tap(unzip_button())
+    if find(r"doesn.t open it", timeout=10) is None:
+        note("a wrong password wasn't said on the preview")
+    shot("wrong-password")
+    tap(find(r"^Password$|^wrongpass$", timeout=5) or field)
+    key("KEYCODE_MOVE_END")
+    for _ in range(12):
+        key("KEYCODE_DEL")
+    type_text("filmsoup")
+    key("KEYCODE_BACK")
+    btn = unzip_button()
+    if not btn.enabled:
+        shot("blocked")
+        raise Stuck("Unzip button disabled with the right password: " + btn.text)
+    tap(btn)
+    allow_permission_dialogs()
+    wait_for(r"^Unzipped — ", 5, "for the Unzipped screen")
+    shot("unzipped")
+    audit("unzipped")
+    listing = sh("ls -lR /sdcard/Pictures/docs")
+    report.append("```\n" + listing.strip()[:2000] + "\n```")
+    for f in ("report.pdf", "notes.txt", "table.csv", "cover.jpg"):
+        if f not in listing:
+            note(f"{f} missing after unzipping docs.zip")
+    if "No TIFFs" in describe():
+        note("unzipping a zip of other files ended on 'No TIFFs, JPEGs or zips'")
+    n = find(r"^Open folder$", timeout=3)
+    if n:
+        tap(n)
+        time.sleep(3)
+        report.append(f"- 'Open folder' after unzipping opened: {foreground()}")
+        shot("open-folder")
+        key("KEYCODE_BACK")
+    launch(cold=False)
+    if find(r"^Back to home$", timeout=3):
+        tap_text(r"^Back to home$")
+
+
 def s_back_and_leave():
     launch()
     key("KEYCODE_BACK")
@@ -510,8 +575,8 @@ def s_rotation():
     time.sleep(3)
     shot("landscape-start")
     audit("start screen, landscape")
-    if not scroll_to(r"Unzip a download", tries=4):
-        note("in landscape, 'Unzip a download' can't be reached: the start screen doesn't scroll")
+    if not scroll_to(r"^Unzip a zip$", tries=4):
+        note("in landscape, 'Unzip a zip' can't be reached: the start screen doesn't scroll")
     tap_text(r"^Settings$")
     shot("landscape-settings")
     tap_text(r"^Done$")
@@ -524,8 +589,8 @@ def s_big_text():
     launch()
     shot("big-text-start")
     audit("start screen, largest text")
-    if not scroll_to(r"Unzip a download", tries=4):
-        note("with the largest text size, 'Unzip a download' falls off the bottom of the start screen and "
+    if not scroll_to(r"^Unzip a zip$", tries=4):
+        note("with the largest text size, 'Unzip a zip' falls off the bottom of the start screen and "
              "can't be scrolled to")
     tap_text(r"^Settings$")
     shot("big-text-settings")
@@ -576,7 +641,7 @@ def s_monkey():
     shot("after-monkey")
 
 
-SCENARIOS = [s_cold_start, s_settings, s_convert_keep, s_unzip_and_replace, s_back_and_leave,
+SCENARIOS = [s_cold_start, s_settings, s_convert_keep, s_unzip_and_replace, s_unzip_any, s_back_and_leave,
              s_rotation, s_big_text, s_dark, s_process_death, s_monkey]
 
 

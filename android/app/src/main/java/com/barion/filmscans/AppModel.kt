@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.documentfile.provider.DocumentFile
+import com.barion.filmscans.core.Archive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CoroutineScope
@@ -24,7 +25,10 @@ import java.util.concurrent.atomic.AtomicInteger
 /** Which kind of roll to work on, when a folder holds both. */
 enum class WorkOn(val label: String) { TIFFS("TIFFs"), JPEGS("Lab JPEGs"), BOTH("Both") }
 
-enum class Phase { Start, Scanning, Planning, Plan, Unzipping, Ready, Converting, Done }
+enum class Phase { Start, Scanning, Planning, Plan, Unzipping, Unzipped, Ready, Converting, Done }
+
+/** One zip's result, for the screen shown after unzipping something that isn't photos. */
+data class Unzipped(val zipName: String, val folder: Uri, val written: Int, val already: Int, val problems: Int)
 
 data class Output(val roll: Roll, val count: Int, val firstJpeg: String?, val renamed: Boolean = false,
                   val media: Uri? = null) {
@@ -69,6 +73,8 @@ class AppModel(private val app: Application) {
     private var roots: List<DocumentFile> = emptyList()
     private val unzipped = HashSet<String>()
     var progress by mutableFloatStateOf(0f)
+    /** What each zip gave, after an unzip that didn't lead to rolls. */
+    val unzippedZips = mutableStateListOf<Unzipped>()
     /** Zips picked from Downloads, waiting for a destination folder. */
     var pendingZips: List<Uri> = emptyList()
     /** Set while the keyboard is up, so background previews pause and typing stays quick. */
@@ -80,7 +86,8 @@ class AppModel(private val app: Application) {
         scan(listOf(root), root.name ?: "")
     }
 
-    private fun scan(where: List<DocumentFile>, label: String) {
+    /** [afterUnzip]: nothing to convert there isn't a problem, it just wasn't photos. */
+    private fun scan(where: List<DocumentFile>, label: String, afterUnzip: Boolean = false) {
         roots = where
         rootName = label
         phase = Phase.Scanning
@@ -96,9 +103,9 @@ class AppModel(private val app: Application) {
             zipsFound.addAll(zips.filter { it.doc.uri.toString() !in unzipped })
             loadThumbnails()
             val any = rolls.isNotEmpty() || zipsFound.isNotEmpty()
-            phase = if (any) Phase.Ready else Phase.Start
-            if (!any && found.isSuccess) status = "No TIFFs, JPEGs or zips in that folder."
-            else if (any) status = ""
+            phase = if (any) Phase.Ready else if (afterUnzip) Phase.Unzipped else Phase.Start
+            if (!any && found.isSuccess && !afterUnzip) status = "No TIFFs, JPEGs or zips in that folder."
+            else status = ""
         }
     }
 
@@ -136,7 +143,7 @@ class AppModel(private val app: Application) {
             for (j in jobs) {
                 status = "Reading ${j.name}…"
                 withContext(Dispatchers.IO) {
-                    runCatching { Unzip.plan(app, j.uri, j.name, j.size, j.dest, j.delete) { s -> status = "${j.name}: $s" } }
+                    runCatching { Unzip.plan(app, j.uri, j.name, j.size, j.dest, j.delete, settings.labJpegDates) { s -> status = "${j.name}: $s" } }
                 }.onSuccess { plans += it }.onFailure { log += "✗ ${it.message ?: j.name}" }
             }
             status = ""
@@ -167,20 +174,38 @@ class AppModel(private val app: Application) {
             if (other != null && other != p.zipName) { out += "${p.zipName} and $other would both save ${t.path}"; break }
         }
         results.forEach { (p, r) -> if (r != null && r.targets.isEmpty() && r.sealed.isEmpty()) out += "${p.zipName}: nothing is left to unzip" }
+        plans.filter { it.needsPassword && it.password.isEmpty() }.forEach { out += "${it.zipName}: type its password" }
+        plans.filter { it.passwordWrong }.forEach { out += "${it.zipName}: that password doesn't open it" }
         return out
     }
 
     /** Stops an unzip after the current file, or a conversion after the files already started. */
     fun stopWork() { stop = true }
 
+    /** Set while passwords are being tried, so Unzip isn't pressed twice. */
+    var checkingPasswords by mutableStateOf(false)
+
     fun startUnzip() {
-        if (plans.isEmpty()) return
+        if (plans.isEmpty() || checkingPasswords) return
         settings.save()
         val todo = plans.toList()
-        val datesForJpegs = settings.labJpegDates
+        scope.launch {
+            // Each password is tried on the zip first: a wrong one is said on the preview, before anything is written.
+            checkingPasswords = true
+            val wrong = withContext(Dispatchers.IO) {
+                todo.filter { p -> p.needsPassword && !runCatching { Archive.passwordFits(p.listing!!, p.password) }.getOrDefault(false) }
+            }
+            checkingPasswords = false
+            wrong.forEach { it.passwordWrong = true }
+            if (wrong.isEmpty() && phase == Phase.Plan) unzip(todo)
+        }
+    }
+
+    private fun unzip(todo: List<ZipPlan>) {
         stop = false
         phase = Phase.Unzipping
         log.clear()
+        unzippedZips.clear()
         WorkService.start(app, "Unzipping")
         scope.launch {
             val total = todo.sumOf { (it.build()?.bytes ?: it.zipSize).coerceAtLeast(1) }
@@ -198,7 +223,7 @@ class AppModel(private val app: Application) {
                 var lastShown = 0L
                 val ok = withContext(Dispatchers.IO) {
                     runCatching {
-                        Unzip.run(app, p, datesForJpegs, out, { stop }) { n ->
+                        Unzip.run(app, p, out, { stop }) { n ->
                             if (n - lastShown > 4_000_000) {
                                 lastShown = n
                                 progress = ((before + n).toFloat() / total).coerceAtMost(1f)
@@ -210,6 +235,7 @@ class AppModel(private val app: Application) {
                 }
                 before += bytes
                 tops += out.tops
+                out.tops.firstOrNull()?.let { unzippedZips += Unzipped(p.zipName, it.uri, out.written, out.already, out.problems.size) }
                 val parts = listOfNotNull(
                     "${out.written} file(s) unzipped",
                     out.already.takeIf { it > 0 }?.let { "$it already there" },
@@ -237,7 +263,12 @@ class AppModel(private val app: Application) {
             notes.clear(); notes.addAll(log)
             val where = if (beforePlan == Phase.Ready) roots else tops.distinctBy { it.uri.toString() }
             if (where.isEmpty()) { status = log.joinToString("\n"); phase = Phase.Start; return@launch }
-            scan(where, if (beforePlan == Phase.Ready) rootName else where.joinToString { it.name ?: "" })
+            // Photo zips go on to their rolls. Any other zip ends here, with where its files went.
+            when {
+                beforePlan == Phase.Ready -> scan(where, rootName)
+                todo.any { it.photo } -> scan(where, where.joinToString { it.name ?: "" }, afterUnzip = true)
+                else -> phase = Phase.Unzipped
+            }
         }
     }
 
@@ -269,7 +300,7 @@ class AppModel(private val app: Application) {
     }
 
     fun reset() {
-        thumbJob?.cancel(); rolls.clear(); log.clear(); outputs.clear(); zipsFound.clear(); notes.clear()
+        thumbJob?.cancel(); rolls.clear(); log.clear(); outputs.clear(); zipsFound.clear(); notes.clear(); unzippedZips.clear()
         closePlans()
         phase = Phase.Start; status = ""
     }

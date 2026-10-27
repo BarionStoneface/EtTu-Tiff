@@ -177,6 +177,29 @@ class EngineTest {
 
     private data class DateFoundCheck(val source: String, val date: LocalDateTime)
 
+    @Test fun unzipsAnyZipLockedOrDeflate64() {
+        for (name in listOf("zipcrypto.zip", "aes256.zip", "locked-inner.zip", "deflate64.zip")) {
+            val zip = File(tmp, name).apply { writeBytes(this@EngineTest.javaClass.classLoader!!.getResource("zip/$name")!!.readBytes()) }
+            val c = Unzip.read(zip)
+            assertFalse(name, c.photo)
+            val password = if (c.listing.needsPassword) "film soup ñ" else null
+            val dest = File(tmp, "out-$name").apply { mkdirs() }
+            val out = Unzip.Outcome()
+            Unzip.run(UnzipPlan.build(c.listing, "", emptyMap(), emptySet()), dest, labJpegDates = false, out = out, password = password)
+            c.close()
+            assertEquals(name, emptyList<String>(), out.problems)
+            assertEquals(name, "hello\n", File(dest, "readme.txt").readText())
+            assertTrue(name, File(dest, if (name == "locked-inner.zip") "Inner/Roll 1/notes.txt" else "Roll 1/notes.txt").length() == 150_000L)
+            assertFalse(name, dest.walk().any { it.name.endsWith(".part") })
+        }
+        // Without the password nothing locked is written, and it says why.
+        val zip = File(tmp, "zipcrypto.zip")
+        val out = Unzip.Outcome()
+        Unzip.read(zip).use { Unzip.run(UnzipPlan.build(it.listing, "", emptyMap(), emptySet()), File(tmp, "nopw").apply { mkdirs() }, false, out) }
+        assertEquals(0, out.written)
+        assertTrue(out.problems.joinToString(), out.problems.all { it.endsWith("is password-protected") })
+    }
+
     @Test fun datingAJpegKeepsItsOtherDetailsAndPicture() {
         val frame = Frame("x.jpg", scanned, 48, 32, scannerMake = "NORITSU KOKI", scannerModel = "HS-1800")
         val withExif = Metadata.exif(frame, RollMeta(), Credits())

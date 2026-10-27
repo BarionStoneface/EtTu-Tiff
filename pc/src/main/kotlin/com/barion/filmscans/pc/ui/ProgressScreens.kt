@@ -130,3 +130,33 @@ internal fun FixDatesScreen(m: AppModel) {
 
 private fun relative(base: File?, f: File): String =
     base?.let { runCatching { it.toPath().relativize(f.toPath()).toString() }.getOrNull() } ?: f.path
+
+/** After unzipping a zip that isn't photos: what it gave and where, with a way to look. */
+@Composable
+internal fun UnzippedScreen(m: AppModel) {
+    var details by remember { mutableStateOf(false) }
+    val files = m.unzippedZips.sumOf { it.written + it.already }
+    val problems = m.unzippedZips.sumOf { it.problems }
+    ScrollList(contentPadding = PaddingValues(16.dp), spacing = 12.dp) {
+        item {
+            Text(if (problems == 0) "Unzipped — $files file(s)." else "Unzipped — $files file(s), $problems problem(s).",
+                style = MaterialTheme.typography.headlineSmall)
+            if (problems > 0) Text("The details below say which files and why.", style = MaterialTheme.typography.bodySmall)
+        }
+        items(m.unzippedZips) { z ->
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(z.zipName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(listOfNotNull(
+                        "${z.written} file(s) in ${z.dir.path}",
+                        z.already.takeIf { it > 0 }?.let { "$it already there" },
+                    ).joinToString(" · "), style = MaterialTheme.typography.bodySmall)
+                    OutlinedButton(onClick = { Shell.open(z.dir) }) { Text("Open folder") }
+                }
+            }
+        }
+        item { Button(onClick = { m.reset() }, modifier = Modifier.fillMaxWidth()) { Text("Back to start") } }
+        item { TextButton(onClick = { details = !details }) { Text(if (details) "Hide details" else "Show details (${m.log.size})") } }
+        if (details) items(m.log.toList()) { line -> Text(line, style = MaterialTheme.typography.bodySmall) }
+    }
+}

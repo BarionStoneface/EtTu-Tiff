@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
@@ -18,10 +19,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.barion.filmscans.core.PlanFolder
 
@@ -56,9 +62,6 @@ fun PlanScreen(m: AppModel) {
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (m.plans.any { it.hasJpegs() }) SettingSwitch("Date the lab's JPEGs", m.settings.labJpegDates,
-                        { m.settings.labJpegDates = it; m.settings.save() },
-                        "JPEGs with no date taken get their scan date, so galleries sort them by when they were scanned.")
                     DeleteZipsSwitch(m)
                 }
             }
@@ -80,6 +83,10 @@ private fun PlanHeader(p: ZipPlan) {
             OutlinedTextField(p.top, { p.top = it }, singleLine = true, label = { Text("Folder to make") },
                 supportingText = { if (p.top.isBlank()) Text("Empty: unzips straight into ${Places.label(p.dest.uri)}") },
                 modifier = Modifier.fillMaxWidth())
+            if (p.needsPassword || l == null) PasswordField(p)
+            if (p.hasJpegs()) SettingSwitch("Date the lab's JPEGs", p.dateJpegs, { p.dateJpegs = it },
+                if (p.photo) "JPEGs with no date taken get their scan date, so galleries sort them by when they were scanned."
+                else "Off for zips that aren't mostly photos, so their files come out exactly as they went in.")
             l?.skipped?.forEach { Text("Can't unzip $it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             if (!l?.sealed.isNullOrEmpty()) Text("${l!!.sealed.size} zip(s) inside are compressed, so their contents are " +
                 "only seen while unzipping. They go into the folders marked below.", style = MaterialTheme.typography.bodySmall)
@@ -137,4 +144,29 @@ private fun PlanFooter(p: ZipPlan) {
         if (example != null) Text("e.g. ${example.path}", style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.primary)
     }
+}
+
+/** The zip's password: needed when files in it are locked, or offered when the zip can't be looked into first. */
+@Composable
+private fun PasswordField(p: ZipPlan) {
+    var show by remember { mutableStateOf(false) }
+    val locked = p.listing?.let { l -> l.files.count { it.item.encrypted } + l.sealed.count { it.item.encrypted } }
+    OutlinedTextField(
+        value = p.password,
+        onValueChange = { p.password = it; p.passwordWrong = false },
+        singleLine = true,
+        label = { Text(if (locked == null) "Password, if it has one" else "Password") },
+        isError = p.passwordWrong,
+        visualTransformation = if (show) VisualTransformation.None else PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+        trailingIcon = { TextButton(onClick = { show = !show }) { Text(if (show) "Hide" else "Show") } },
+        supportingText = {
+            Text(when {
+                p.passwordWrong -> "That password doesn't open it."
+                locked == null -> "This zip can't be looked into first, so a password is only checked while unzipping."
+                else -> "$locked locked file(s) in it. The password is checked before anything is unzipped."
+            })
+        },
+        modifier = Modifier.fillMaxWidth(),
+    )
 }

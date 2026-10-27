@@ -31,7 +31,7 @@ jobs:
         run: ./gradlew --stacktrace :app:assembleRelease
       - name: Make test scans
         run: |
-          pip install numpy tifffile pillow
+          pip install numpy tifffile pillow pyzipper
           python3 android/tools/emulator/make_fixtures.py fixtures
       - uses: actions/upload-artifact@v4
         with:

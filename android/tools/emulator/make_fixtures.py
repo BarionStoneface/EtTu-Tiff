@@ -4,6 +4,7 @@ Scans/Roll A   three 8-bit RGB TIFFs with a scan date and scanner tags
 Scans/Roll B   two TIFFs with no date at all (the "enter a date" path),
                one of them a 16-bit 5000x3400 scan, about 100 MB, like a real film scan
 Download/lab.zip   the way labs ship rolls: Jpegs.zip and Tiffs.zip inside one zip
+Download/docs.zip  any other zip: documents and one photo, password "filmsoup"
 """
 import io
 import os
@@ -68,6 +69,15 @@ tiffs = inner([(f"Order 4471/Roll 1/{i:05}.tif", tiff_bytes(1500, 1000)) for i i
 with zipfile.ZipFile(f"{out}/Download/lab.zip", "w", zipfile.ZIP_STORED) as z:
     z.writestr(zipfile.ZipInfo("Jpegs.zip", (2021, 8, 3, 10, 0, 0)), jpegs)
     z.writestr(zipfile.ZipInfo("Tiffs.zip", (2021, 8, 3, 10, 0, 0)), tiffs)
+
+# Not photos, and locked with a password (AES, as 7-Zip and WinZip make): unzipping any kind of zip.
+import pyzipper
+with pyzipper.AESZipFile(f"{out}/Download/docs.zip", "w", compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES) as z:
+    z.setpassword(b"filmsoup")
+    z.writestr("report.pdf", b"%PDF-1.4\n" + bytes(rng.integers(0, 256, 200_000, dtype=np.uint8)))
+    z.writestr("notes.txt", b"Shot on a Pentax, developed at home.\n" * 200)
+    z.writestr("data/table.csv", b"frame,shutter,aperture\n" + b"".join(b"%d,125,8\n" % i for i in range(36)))
+    z.writestr("cover.jpg", jpeg_bytes(800, 600))
 
 for root, _, files in os.walk(out):
     for f in files:

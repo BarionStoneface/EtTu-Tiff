@@ -56,10 +56,11 @@ internal fun SettingsScreen(m: AppModel) {
                     "deleted when you replace the TIFFs, and each roll can still change it. Off: they're kept.")
         }
         item {
-            SettingSwitch("Date the lab's JPEGs when unzipping", m.settings.labJpegDates, { m.settings.labJpegDates = it },
+            SettingSwitch("Date the lab's JPEGs when unzipping photo zips", m.settings.labJpegDates, { m.settings.labJpegDates = it },
                 "A JPEG with no date taken gets its scan date (from its own XMP data, or failing that its date " +
                     "in the zip), so galleries sort it by when it was scanned, not when it was unzipped. Nothing else " +
-                    "in the file is changed.")
+                    "in the file is changed. Zips that aren't mostly photos are left exactly as they are; either way " +
+                    "it can be switched for each zip before unzipping.")
         }
         item {
             Text("JPEG quality: ${m.settings.quality}${if (m.settings.quality == 100) " (best)" else ""}")

@@ -15,6 +15,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -52,9 +56,6 @@ fun PlanScreen(m: AppModel, pick: Pickers) {
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (m.plans.any { it.contents.hasJpegs }) SettingSwitch("Date the lab's JPEGs", m.settings.labJpegDates,
-                        { m.settings.labJpegDates = it; m.settings.save() },
-                        "JPEGs with no date taken get their scan date, so photo apps sort them by when they were scanned.")
                     DeleteZipsSwitch(m)
                 }
             }
@@ -76,6 +77,10 @@ private fun PlanHeader(p: ZipPlan, pick: Pickers) {
             OutlinedTextField(p.top, { p.top = it }, singleLine = true, label = { Text("Folder to make") },
                 supportingText = { if (p.top.isBlank()) Text("Empty: unzips straight into ${p.dest.path}") },
                 modifier = Modifier.fillMaxWidth())
+            if (p.needsPassword) PasswordField(p)
+            if (p.contents.hasJpegs) SettingSwitch("Date the lab's JPEGs", p.dateJpegs, { p.dateJpegs = it },
+                if (p.photo) "JPEGs with no date taken get their scan date, so photo apps sort them by when they were scanned."
+                else "Off for zips that aren't mostly photos, so their files come out exactly as they went in.")
             l.skipped.forEach { Text("Can't unzip $it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             if (l.sealed.isNotEmpty()) Text("${l.sealed.size} zip(s) inside are compressed, so their contents are " +
                 "only seen while unzipping. They go into the folders marked below.", style = MaterialTheme.typography.bodySmall)
@@ -132,4 +137,26 @@ private fun PlanFooter(p: ZipPlan) {
         if (example != null) Text("e.g. ${java.io.File(p.dest, example.path).path}", style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.primary)
     }
+}
+
+/** The zip's password, needed when files in it are locked. */
+@Composable
+private fun PasswordField(p: ZipPlan) {
+    var show by remember { mutableStateOf(false) }
+    val l = p.contents.listing
+    val locked = l.files.count { it.item.encrypted } + l.sealed.count { it.item.encrypted }
+    OutlinedTextField(
+        value = p.password,
+        onValueChange = { p.password = it; p.passwordWrong = false },
+        singleLine = true,
+        label = { Text("Password") },
+        isError = p.passwordWrong,
+        visualTransformation = if (show) VisualTransformation.None else PasswordVisualTransformation(),
+        trailingIcon = { TextButton(onClick = { show = !show }) { Text(if (show) "Hide" else "Show") } },
+        supportingText = {
+            Text(if (p.passwordWrong) "That password doesn't open it."
+                else "$locked locked file(s) in it. The password is checked before anything is unzipped.")
+        },
+        modifier = Modifier.fillMaxWidth(),
+    )
 }

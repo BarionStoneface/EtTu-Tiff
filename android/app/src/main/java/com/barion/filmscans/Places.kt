@@ -76,13 +76,16 @@ object Places {
     }
 
     /** Opens the folder in My Files (Samsung) or the Files app. */
-    fun openFolder(ctx: Context, o: Output) {
-        val uri = o.roll.outputUri ?: o.roll.folder.uri
+    fun openFolder(ctx: Context, o: Output) = openFolder(ctx, o.roll.outputUri ?: o.roll.folder.uri)
+
+    fun openFolder(ctx: Context, uri: Uri) {
         val path = filePath(uri)
         val id = docId(uri)
         val tries = buildList {
             if (path != null) add(Intent("samsung.myfiles.intent.action.LAUNCH_MY_FILES")
                 .putExtra("samsung.myfiles.intent.extra.START_PATH", path))
+            // Before Android 10 the Files app can crash on a folder link ("Invalid URI": seen on Android 8), so only My Files is tried.
+            if (android.os.Build.VERSION.SDK_INT < 29) return@buildList
             if (id != null) add(Intent(Intent.ACTION_VIEW)
                 .setDataAndType(DocumentsContract.buildDocumentUri(uri.authority, id), DocumentsContract.Document.MIME_TYPE_DIR)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))

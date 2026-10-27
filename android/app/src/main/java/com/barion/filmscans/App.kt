@@ -67,10 +67,10 @@ fun App(m: AppModel) {
             settings -> { m.settings.save(); settings = false }
             m.phase == Phase.Ready -> leave = true
             m.phase == Phase.Plan -> m.leavePlan()
-            m.phase == Phase.Done -> m.reset()
+            m.phase == Phase.Done || m.phase == Phase.Unzipped -> m.reset()
         }
     }
-    val canGoBack = settings || m.phase == Phase.Ready || m.phase == Phase.Plan || m.phase == Phase.Done
+    val canGoBack = settings || m.phase == Phase.Ready || m.phase == Phase.Plan || m.phase == Phase.Done || m.phase == Phase.Unzipped
     BackHandler(enabled = canGoBack, onBack = goBack)
 
     Scaffold(
@@ -105,10 +105,11 @@ fun App(m: AppModel) {
                 val streamed = m.plans.any { it.listing == null || it.listing.sealed.isNotEmpty() }
                 Button(
                     onClick = { m.startUnzip() },
-                    enabled = problems.isEmpty(),
+                    enabled = problems.isEmpty() && !m.checkingPasswords,
                     modifier = Modifier.navigationBarsPadding().fillMaxWidth().padding(16.dp),
                 ) {
                     Text(when {
+                        m.checkingPasswords -> "Checking the password…"
                         problems.isNotEmpty() -> "Fix the issues marked in red"
                         streamed && files == 0 -> "Unzip (${sizeText(bytes)})"
                         else -> "Unzip $files file(s) · ${sizeText(bytes)}"
@@ -144,6 +145,7 @@ fun App(m: AppModel) {
                 m.phase == Phase.Planning -> Busy("Reading the zip…", m.status)
                 m.phase == Phase.Plan -> PlanScreen(m)
                 m.phase == Phase.Unzipping -> UnzipScreen(m)
+                m.phase == Phase.Unzipped -> UnzippedScreen(m)
                 m.phase == Phase.Ready -> RollList(m)
                 m.phase == Phase.Converting -> ProgressScreen(m)
                 else -> DoneScreen(m)
