@@ -105,10 +105,20 @@ def tap(n):
     time.sleep(1.2)
 
 
+def describe():
+    """What's on screen, for the report when something can't be found."""
+    seen = []
+    for n in dump():
+        lab = n.label.strip()
+        if lab and lab not in seen:
+            seen.append(lab + ("" if n.enabled else " (disabled)"))
+    return " | ".join(seen)[:1500]
+
+
 def tap_text(pattern, timeout=15, **kw):
     n = find(pattern, timeout, **kw)
     if n is None:
-        raise Stuck(f"couldn't find '{pattern}' on screen")
+        raise Stuck(f"couldn't find '{pattern}' on screen. Showing: {describe()}")
     tap(n)
     return n
 
@@ -232,6 +242,7 @@ def picker_go_to_storage():
     roots = find(r"^Show roots$", timeout=4)
     if roots:
         tap(roots)
+        shot("picker-roots")
         n = find(device, timeout=4)
         if n is None:
             # Android 8 and 9 hide internal storage unless it's switched on in the picker's menu.
@@ -250,19 +261,20 @@ def picker_go_to_storage():
             tap_text(r"^Show roots$", timeout=4)
             n = find(device, timeout=4)
         if n is None:
-            raise Stuck("couldn't find internal storage in the picker")
+            raise Stuck(f"couldn't find internal storage in the picker. Showing: {describe()}")
         tap(n)
         return
-    raise Stuck("picker has no roots button and no storage entry")
+    raise Stuck(f"picker has no roots button and no storage entry. Showing: {describe()}")
 
 
 def picker_open_path(*folders):
     for f in folders:
         n = scroll_to("^" + re.escape(f) + "$")
         if n is None:
-            raise Stuck(f"picker: folder {f} not found")
+            raise Stuck(f"picker: folder {f} not found. Showing: {describe()}")
         tap(n)
         time.sleep(1)
+        shot("picker-" + f)
 
 
 def picker_use_folder():
@@ -455,6 +467,7 @@ def s_unzip_and_replace():
         shot("replace-blocked")
         raise Stuck("replace button missing or disabled")
     tap(btn)
+    time.sleep(1)
     shot("confirm-delete")
     tap_text(r"^(Convert and delete|Tag in place)$")
     wait_for(r"^Back to home$", 10, "for convert and delete to finish")
@@ -568,7 +581,7 @@ def main():
             shot("stuck")
             note(f"scenario stopped: {e}")
             traceback.print_exc()
-            sh(f"am force-stop {PKG}")
+            sh(f"am force-stop {PKG}; am force-stop com.android.documentsui; am force-stop com.google.android.documentsui")
             key("KEYCODE_HOME")
         check_crashes()
     head = [f"# Findings, API {API}\n"] + [f"- **{s}**: {w}" for s, w in findings] if findings else [f"# API {API}: no findings\n"]

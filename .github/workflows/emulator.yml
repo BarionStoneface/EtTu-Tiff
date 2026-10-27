@@ -83,6 +83,7 @@ jobs:
           disk-size: 6000M
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
+          pre-emulator-launch-script: pip install pillow
           script: bash android/tools/emulator/run.sh
       - uses: actions/upload-artifact@v4
         if: always()
@@ -90,3 +91,39 @@ jobs:
           name: walk-api-${{ matrix.api }}-${{ matrix.target }}
           path: walk-out
           retention-days: 14
+
+  # Screenshots and reports, shrunk and committed to a hidden ref (not a branch), so they can be
+  # fetched with git: refs/walk-results/<run id>.
+  collect:
+    needs: walk
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: walk-api-*
+          path: results
+      - name: Shrink screenshots and push
+        run: |
+          pip install pillow
+          python3 - <<'PY'
+          import pathlib
+          from PIL import Image
+          for p in pathlib.Path("results").rglob("*.png"):
+              im = Image.open(p).convert("RGB")
+              im.thumbnail((540, 1200))
+              im.save(p.with_suffix(".jpg"), quality=80)
+              p.unlink()
+          for p in pathlib.Path("results").rglob("*.jpg"):
+              if p.stat().st_size > 2_000_000:
+                  p.unlink()
+          PY
+          cd results
+          git init -q
+          git config user.name "emulator walk"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -qm "Emulator walk ${{ github.run_id }} on ${{ github.sha }}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" HEAD:refs/walk-results/${{ github.run_id }}
