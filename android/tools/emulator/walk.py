@@ -246,7 +246,9 @@ def picker_go_to_storage():
         n = find(device, timeout=4)
         if n is None:
             # Android 8 and 9 hide internal storage unless it's switched on in the picker's menu.
-            key("KEYCODE_BACK")
+            w, h = screen_size()
+            adb("shell", "input", "tap", str(int(w * 0.92)), str(h // 2))
+            time.sleep(1)
             more = find(r"^More options$", timeout=4)
             if more:
                 tap(more)
@@ -257,7 +259,7 @@ def picker_go_to_storage():
                          "EXTRA_SHOW_ADVANCED to show it.")
                     tap(show)
                 else:
-                    key("KEYCODE_BACK")
+                    raise Stuck(f"no 'Show internal storage' in the picker menu. Showing: {describe()}")
             tap_text(r"^Show roots$", timeout=4)
             n = find(device, timeout=4)
         if n is None:
@@ -272,8 +274,12 @@ def picker_open_path(*folders):
         n = scroll_to("^" + re.escape(f) + "$")
         if n is None:
             raise Stuck(f"picker: folder {f} not found. Showing: {describe()}")
-        tap(n)
-        time.sleep(1)
+        for _ in range(3):
+            tap(n)
+            time.sleep(1.5)
+            if find("^" + re.escape(f) + "$", timeout=2) is None or find(r"Can.t use this folder|^FILES ON|^Files on", timeout=1) is None:
+                break
+            n = find("^" + re.escape(f) + "$", timeout=2) or n
         shot("picker-" + f)
 
 
@@ -380,7 +386,7 @@ def s_convert_keep():
     peak = [0]
 
     def mem():
-        m = re.search(r"TOTAL PSS:\s+(\d+)|TOTAL:?\s+(\d+)", sh(f"dumpsys meminfo {PKG} | grep -E 'TOTAL'"))
+        m = re.search(r"TOTAL PSS:\s+(\d+)|TOTAL\s+(\d+)", sh(f"dumpsys meminfo {PKG}"))
         if m:
             peak[0] = max(peak[0], int(m.group(1) or m.group(2)))
     launch(cold=False)
@@ -462,7 +468,7 @@ def s_unzip_and_replace():
         tap(n)
     tap_text(r"^Replace them")
     shot("replace-mode")
-    btn = find(r"delete the TIFFs$|in place$", timeout=5)
+    btn = find(r"^(Convert|Tag) .*(delete the TIFFs|in place)$", timeout=5)
     if btn is None or not btn.enabled:
         shot("replace-blocked")
         raise Stuck("replace button missing or disabled")
