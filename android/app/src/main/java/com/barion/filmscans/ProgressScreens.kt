@@ -109,9 +109,10 @@ internal fun UnzippedScreen(m: AppModel) {
             Text(if (problems == 0) "Unzipped — $files file(s)." else "Unzipped — $files file(s), $problems problem(s).",
                 style = MaterialTheme.typography.headlineSmall)
             if (problems > 0) Text("The details below say which files and why.", style = MaterialTheme.typography.bodySmall)
-            m.log.firstOrNull { it.trimStart().startsWith("File dates") || it.trimStart().startsWith("This phone doesn't let") }?.let {
-                Text(it.trim(), style = MaterialTheme.typography.bodySmall)
-            }
+            // The photo wording of this note (scan dates, galleries) doesn't fit a zip of other files.
+            if (m.log.any { it.trimStart().startsWith("This phone doesn't let") })
+                Text("This phone doesn't let apps set file dates, so the files show today's date rather than their " +
+                    "dates in the zip.", style = MaterialTheme.typography.bodySmall)
         }
         items(m.unzippedZips) { z ->
             Card(Modifier.fillMaxWidth()) {

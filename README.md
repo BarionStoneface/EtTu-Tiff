@@ -68,6 +68,13 @@ anyway" carries on. It does the same as the phone app, plus:
   on the same name stop it. Inner zips are read where they sit inside the
   outer one, so even a 13 GB `Tiffs.zip` is listed straight away, and
   everything is unpacked in one pass.
+- **Unzips any other zip too.** Documents, backups, anything: the same preview,
+  then a screen saying where the files went, with **Open folder**. Each file
+  keeps its date from the zip. Zips locked with a password (the usual kind, or
+  AES from 7-Zip and WinZip) ask for it, and it's checked before anything is
+  written. Deflate64, which Windows uses for big files, is read too. Only
+  BZIP2, LZMA, XZ, Zstandard and PPMd files can't be unzipped; the preview
+  names them.
 - **File dates, too, where the phone allows.** Each JPEG's own file date (what a
   file manager shows, and what Windows shows after copying) is set to the scan
   date, and so is each unzipped file's. Android doesn't let every app do this on
@@ -79,7 +86,8 @@ anyway" carries on. It does the same as the phone app, plus:
 - **Dates the lab's JPEGs.** A phone can't set a file's date, so a lab JPEG with
   no date taken gets its scan date written in (from its own XMP, or its date in
   the zip). Galleries then sort it by when it was scanned, not when it was
-  unzipped. Nothing else in the file changes, and it can be turned off. The
+  unzipped. Nothing else in the file changes. It starts on only for zips that
+  are mostly photos, and can be switched for each zip in the preview. The
   zip's dates are also remembered for the TIFFs after the app closes.
 - **Tags the lab's JPEGs too, without re-saving them.** Most labs send JPEGs
   as standard and TIFFs only as an extra. A folder of the lab's JPEGs gets the
