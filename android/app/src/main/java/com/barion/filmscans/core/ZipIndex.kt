@@ -7,7 +7,7 @@ import java.util.zip.CRC32
 import java.util.zip.Inflater
 import java.util.zip.InflaterInputStream
 
-class ZipFormatException(msg: String) : IOException(msg)
+open class ZipFormatException(msg: String) : IOException(msg)
 
 /** A byte range of another source, read in place: how a zip stored inside a zip is opened without copying it. */
 class SubSource(private val parent: ByteSource, private val start: Long, override val size: Long) : ByteSource {
@@ -29,14 +29,28 @@ class ZipItem(
     val localHeaderOffset: Long,
     val time: LocalDateTime?,
     val isDirectory: Boolean,
+    /** The time as stored, which an old-style password check can use. */
+    val dosTime: Int = 0,
+    /** AES strength (1, 2, 3 for 128, 192, 256 bits), or 0 when it isn't AES. */
+    val aesStrength: Int = 0,
+    /** How the data is compressed: for AES the real method is kept apart from [method] (99). */
+    val realMethod: Int = method,
 ) {
     val encrypted get() = flags and 1 != 0
     val stored get() = method == 0
-    /** Why this entry can't be read, or null if it can. */
+    /** Why this entry can't be read, or null if it can. A password is asked for, so it isn't a reason. */
     val unreadable: String? get() = when {
-        encrypted -> "it's password-protected"
-        method != 0 && method != 8 -> "it uses a compression type this app can't read (method $method)"
+        encrypted && flags and 0x40 != 0 -> "it uses a kind of encryption this app can't read"
+        realMethod !in READABLE -> "it uses a compression type this app can't read (${methodName(realMethod)})"
         else -> null
+    }
+
+    companion object {
+        /** Stored, deflate and Deflate64. */
+        val READABLE = setOf(0, 8, 9)
+        fun methodName(m: Int) = when (m) {
+            12 -> "BZIP2"; 14 -> "LZMA"; 93 -> "Zstandard"; 95 -> "XZ"; 98 -> "PPMd"; else -> "method $m"
+        }
     }
 }
 
@@ -83,7 +97,10 @@ object ZipIndex {
             if (u32(cd, p) != CEN) throw ZipFormatException("damaged zip directory")
             val flags = u16(cd, p + 8)
             val method = u16(cd, p + 10)
-            val time = dosTime(u16(cd, p + 14), u16(cd, p + 12))
+            val rawTime = u16(cd, p + 12)
+            val time = dosTime(u16(cd, p + 14), rawTime)
+            var aes = 0
+            var realMethod = method
             val crc = u32(cd, p + 16)
             var csize = u32(cd, p + 20)
             var usize = u32(cd, p + 24)
@@ -106,6 +123,9 @@ object ZipIndex {
                     if (usize == 0xFFFFFFFFL && q + 8 <= d + len) { usize = u64(cd, q); q += 8 }
                     if (csize == 0xFFFFFFFFL && q + 8 <= d + len) { csize = u64(cd, q); q += 8 }
                     if (offset == 0xFFFFFFFFL && q + 8 <= d + len) { offset = u64(cd, q) }
+                } else if (id == 0x9901 && len >= 7) {
+                    aes = cd[d + 4].toInt() and 0xFF
+                    realMethod = u16(cd, d + 5)
                 } else if (id == 0x7075 && len > 5 && cd[d].toInt() == 1) {
                     val c = CRC32().also { it.update(rawName) }.value
                     if (c == u32(cd, d + 1)) name = String(cd, d + 5, len - 5, Charsets.UTF_8)
@@ -114,7 +134,7 @@ object ZipIndex {
             }
             name = name.replace('\\', '/')
             val isDir = name.endsWith("/") || (extAttr and 0x10L != 0L && usize == 0L)
-            out += ZipItem(name, method, flags, crc, csize, usize, offset + shift, time, isDir)
+            out += ZipItem(name, method, flags, crc, csize, usize, offset + shift, time, isDir, rawTime, aes, realMethod)
             p = extraStart + extraLen + commentLen
         }
         return out
@@ -133,19 +153,45 @@ object ZipIndex {
         return SubSource(src, dataStart(src, item), item.size)
     }
 
-    /** The entry's contents as a stream. Stored entries are read in place; deflated ones are inflated as read. */
-    fun open(src: ByteSource, item: ZipItem): InputStream {
+    /**
+     * The entry's contents as a stream. Stored entries are read in place; compressed ones are
+     * inflated as read. A password-protected one needs [password].
+     */
+    fun open(src: ByteSource, item: ZipItem, password: String? = null): InputStream {
         item.unreadable?.let { throw ZipFormatException("can't unzip ${item.name.substringAfterLast('/')}: $it") }
         val start = dataStart(src, item)
-        val raw = SourceStream(src, start, if (item.stored) item.size else item.compressedSize)
-        return if (item.stored) raw else Inflating(raw)
+        var raw: InputStream = SourceStream(src, start, if (item.stored && !item.encrypted) item.size else item.compressedSize)
+        if (item.encrypted) raw = ZipCrypt.open(raw, item, password ?: throw PasswordNeeded(item.name))
+        return decompress(raw, item.realMethod)
     }
 
+    /** Undoes [method] on [raw]: nothing for stored, inflating for deflate and Deflate64. */
+    fun decompress(raw: InputStream, method: Int): InputStream = when (method) {
+        0 -> raw
+        8 -> Inflating(raw)
+        9 -> {
+            val b = java.io.BufferedInputStream(raw, 1 shl 16)
+            object : java.io.FilterInputStream(Inflate64({ b.read() })) { override fun close() { b.close() } }
+        }
+        else -> throw ZipFormatException("it uses a compression type this app can't read (${ZipItem.methodName(method)})")
+    }
+
+    /**
+     * Whether [password] opens [item]: the whole entry is read and its check value compared, so a
+     * password that only passes the quick header check (1 in 256 do) isn't taken for the right one.
+     */
+    fun passwordFits(src: ByteSource, item: ZipItem, password: String): Boolean = try {
+        val crc = CRC32()
+        open(src, item, password).use { s -> val buf = ByteArray(1 shl 16); while (true) { val n = s.read(buf); if (n < 0) break; crc.update(buf, 0, n) } }
+        // AES (version 2) leaves the check value at 0 and relies on its own check, already done.
+        item.crc == 0L && item.aesStrength > 0 || crc.value == item.crc
+    } catch (_: WrongPassword) { false } catch (_: java.util.zip.ZipException) { false } catch (_: ZipFormatException) { false }
+
     /** The first [limit] bytes of an entry: enough to read a scan's dates without unpacking all of it. */
-    fun head(src: ByteSource, item: ZipItem, limit: Int): ByteArray {
+    fun head(src: ByteSource, item: ZipItem, limit: Int, password: String? = null): ByteArray {
         val n = minOf(item.size, limit.toLong()).toInt()
         val out = ByteArray(n)
-        open(src, item).use { s ->
+        open(src, item, password).use { s ->
             var got = 0
             while (got < n) { val r = s.read(out, got, n - got); if (r < 0) break; got += r }
             return if (got == n) out else out.copyOf(got)
@@ -164,15 +210,20 @@ object ZipIndex {
         private var bufStart = 0L
         private var bufLen = 0
         init { if (end > src.size) throw ZipFormatException("zip is truncated") }
-        override fun read(): Int { val b = ByteArray(1); return if (read(b, 0, 1) < 0) -1 else b[0].toInt() and 0xFF }
+        override fun read(): Int {
+            if (pos >= end) return -1
+            if (pos < bufStart || pos >= bufStart + bufLen) fill()
+            return buf[(pos++ - bufStart).toInt()].toInt() and 0xFF
+        }
+        private fun fill() {
+            bufStart = pos
+            bufLen = minOf(buf.size.toLong(), end - pos).toInt()
+            src.read(pos, buf, 0, bufLen)
+        }
         override fun read(b: ByteArray, off: Int, len: Int): Int {
             if (len == 0) return 0
             if (pos >= end) return -1
-            if (pos < bufStart || pos >= bufStart + bufLen) {
-                bufStart = pos
-                bufLen = minOf(buf.size.toLong(), end - pos).toInt()
-                src.read(pos, buf, 0, bufLen)
-            }
+            if (pos < bufStart || pos >= bufStart + bufLen) fill()
             val n = minOf(len.toLong(), bufStart + bufLen - pos).toInt()
             System.arraycopy(buf, (pos - bufStart).toInt(), b, off, n)
             pos += n
@@ -204,7 +255,7 @@ object ZipIndex {
 
     // ---- names and dates
 
-    private fun decodeName(raw: ByteArray, flags: Int): String {
+    internal fun decodeName(raw: ByteArray, flags: Int): String {
         if (flags and 0x800 != 0) return String(raw, Charsets.UTF_8)
         if (raw.all { it >= 0 }) return String(raw, Charsets.US_ASCII)
         // Many zippers write UTF-8 without saying so; anything that isn't valid UTF-8 is old DOS code page 437.

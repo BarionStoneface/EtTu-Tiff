@@ -15,6 +15,8 @@ class SealedZip(val folder: String, val container: ByteSource, val item: ZipItem
 
 class Listing(val files: List<ArchiveFile>, val sealed: List<SealedZip>, val skipped: List<String>) {
     val totalBytes get() = files.sumOf { it.size } + sealed.sumOf { it.item.size }
+    /** Some of it needs a password. */
+    val needsPassword get() = files.any { it.item.encrypted } || sealed.any { it.item.encrypted }
 }
 
 /**
@@ -41,6 +43,19 @@ object Archive {
     }
 
     fun isZip(name: String) = name.lowercase().endsWith(".zip")
+
+    /**
+     * Whether [password] opens what's locked in [listing]. The smallest locked file is read
+     * whole and checked; a locked zip inside is only checked by its header.
+     */
+    fun passwordFits(listing: Listing, password: String): Boolean {
+        listing.files.filter { it.item.encrypted }.minByOrNull { it.size }?.let { return ZipIndex.passwordFits(it.container, it.item, password) }
+        val zip = listing.sealed.firstOrNull { it.item.encrypted } ?: return true
+        return try {
+            ZipIndex.open(zip.container, zip.item, password).use { it.read(ByteArray(1 shl 16)) }
+            true
+        } catch (_: WrongPassword) { false } catch (_: ZipFormatException) { false } catch (_: java.util.zip.ZipException) { false }
+    }
 
     fun list(src: ByteSource): Listing {
         val files = mutableListOf<ArchiveFile>()
