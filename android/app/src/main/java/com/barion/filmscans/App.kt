@@ -55,6 +55,9 @@ fun App(m: AppModel) {
     val destPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) m.unzipDownloads(uri) else m.pendingZips = emptyList()
     }
+    val sharePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) m.share.open(uri)
+    }
     val zipPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) { m.pendingZips = uris; destPicker.launch(Places.pictures) }
     }
@@ -62,15 +65,17 @@ fun App(m: AppModel) {
     val ime = WindowInsets.isImeVisible
     LaunchedEffect(ime) { m.typing = ime }
 
+    val sharing = m.share.step
     val goBack: () -> Unit = {
         when {
             settings -> { m.settings.save(); settings = false }
+            sharing == ShareStep.Choose || sharing == ShareStep.Done -> m.share.close()
             m.phase == Phase.Ready -> leave = true
             m.phase == Phase.Plan -> m.leavePlan()
             m.phase == Phase.Done -> m.reset()
         }
     }
-    val canGoBack = settings || m.phase == Phase.Ready || m.phase == Phase.Plan || m.phase == Phase.Done
+    val canGoBack = settings || sharing == ShareStep.Choose || sharing == ShareStep.Done || m.phase == Phase.Ready || m.phase == Phase.Plan || m.phase == Phase.Done
     BackHandler(enabled = canGoBack, onBack = goBack)
 
     Scaffold(
@@ -78,6 +83,7 @@ fun App(m: AppModel) {
             TopAppBar(
                 title = {
                     if (settings) Text("Settings")
+                    else if (sharing != null) Text("Shrink and zip")
                     else Text(buildAnnotatedString {
                         append("Et Tu, Tiff")
                         withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)) { append("?") }
@@ -89,7 +95,7 @@ fun App(m: AppModel) {
                 },
                 actions = {
                     if (settings) TextButton(onClick = { m.settings.save(); settings = false }) { Text("Done") }
-                    else if (m.phase != Phase.Converting && m.phase != Phase.Unzipping && m.phase != Phase.Planning) {
+                    else if (sharing == null && m.phase != Phase.Converting && m.phase != Phase.Unzipping && m.phase != Phase.Planning) {
                         if (m.phase == Phase.Ready && m.activeRolls.isNotEmpty()) TextButton(onClick = { dryRun = true }) { Text("Dry run") }
                         TextButton(onClick = { settings = true }) { Text("Settings") }
                     }
@@ -98,7 +104,15 @@ fun App(m: AppModel) {
         },
         bottomBar = {
             // Hidden while typing, so the keyboard doesn't push it up over the fields.
-            if (!settings && m.phase == Phase.Plan && !WindowInsets.isImeVisible) {
+            if (!settings && sharing == ShareStep.Choose && !WindowInsets.isImeVisible) {
+                val n = m.share.photos()
+                Button(
+                    onClick = { m.share.start() },
+                    enabled = n > 0,
+                    modifier = Modifier.navigationBarsPadding().fillMaxWidth().padding(16.dp),
+                ) { Text(if (n == 0) "Tick a folder" else "Shrink and zip $n photo(s) · roughly ${sizeText(m.share.estimate(n))}") }
+            }
+            if (!settings && sharing == null && m.phase == Phase.Plan && !WindowInsets.isImeVisible) {
                 val problems by remember { derivedStateOf { m.planProblems() } }
                 val files by remember { derivedStateOf { m.plans.sumOf { p -> p.build()?.targets?.size ?: 0 } } }
                 val bytes by remember { derivedStateOf { m.plans.sumOf { p -> p.build()?.bytes ?: p.zipSize } } }
@@ -115,7 +129,7 @@ fun App(m: AppModel) {
                     })
                 }
             }
-            if (!settings && m.phase == Phase.Ready && !WindowInsets.isImeVisible) {
+            if (!settings && sharing == null && m.phase == Phase.Ready && !WindowInsets.isImeVisible) {
                 val n by remember { derivedStateOf { m.activeRolls.sumOf { it.files.size } } }
                 val blocked by remember { derivedStateOf { m.activeRolls.any { it.problems(m.settings.keepTiffs).isNotEmpty() } } }
                 val replace = !m.settings.keepTiffs
@@ -136,10 +150,14 @@ fun App(m: AppModel) {
         Column(Modifier.padding(pad).consumeWindowInsets(pad).imePadding().fillMaxSize()) {
             when {
                 settings -> SettingsScreen(m)
+                sharing == ShareStep.Reading -> Busy("Finding photos…", m.share.status)
+                sharing == ShareStep.Choose -> ShareChooseScreen(m)
+                sharing == ShareStep.Working -> ShareProgressScreen(m.share)
+                sharing == ShareStep.Done -> ShareDoneScreen(m.share)
                 m.phase == Phase.Start -> StartScreen(m, pick = { picker.launch(null) }, unzip = {
                     zipPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/x-zip",
                         "multipart/x-zip", "application/octet-stream"))
-                })
+                }, share = { sharePicker.launch(Places.pictures) })
                 m.phase == Phase.Scanning -> Busy("Reading scans…", m.status)
                 m.phase == Phase.Planning -> Busy("Reading the zip…", m.status)
                 m.phase == Phase.Plan -> PlanScreen(m)

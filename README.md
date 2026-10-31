@@ -93,6 +93,14 @@ anyway" carries on. It does the same as the phone app, plus:
   BigTIFF over 4 GB, strips or tiles, and no compression, LZW, Deflate,
   PackBits or JPEG. Each kind is checked against tifffile, the library the
   desktop script used.
+- **Shrinks and zips photos to send.** Pick an album or a folder of rolls:
+  each photo (TIFF, JPEG, PNG, WebP or HEIC) gets a smaller JPEG copy, 1568
+  pixels on the long side unless you choose 2048, 3000 or your own size. The
+  copies keep their dates, camera, film and copyright, but no location. They
+  go into one zip with the folders kept, or into several ("part 1 of 3") past
+  the size you set, with each folder kept in one zip where it fits. The zips
+  are saved in the picked folder and can be sent straight from the app; the
+  originals aren't touched.
 - **Dry run.** Lists exactly what would happen to every file (its new name,
   its scan date and where that came from, what gets deleted, renamed or
   replaced) without changing anything.

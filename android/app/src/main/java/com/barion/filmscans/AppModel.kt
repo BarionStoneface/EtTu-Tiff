@@ -42,6 +42,9 @@ class AppModel(private val app: Application) {
     /** Your name, licence, choices and past answers, kept between runs. */
     val settings = Settings(app)
 
+    /** Shrinking a folder's photos and zipping them to send; separate from the rolls. */
+    val share = ShareModel(app, scope, settings)
+
     // ---- the current batch
     var phase by mutableStateOf(Phase.Start)
     var status by mutableStateOf("")
@@ -171,7 +174,7 @@ class AppModel(private val app: Application) {
     }
 
     /** Stops an unzip after the current file, or a conversion after the files already started. */
-    fun stopWork() { stop = true }
+    fun stopWork() { stop = true; share.stop = true }
 
     fun startUnzip() {
         if (plans.isEmpty()) return

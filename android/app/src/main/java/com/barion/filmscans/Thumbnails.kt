@@ -33,7 +33,7 @@ object Thumbnails {
         bmp.asImageBitmap()
     }.getOrNull()
 
-    private fun orientationMatrix(o: Int) = Matrix().apply {
+    internal fun orientationMatrix(o: Int) = Matrix().apply {
         when (o) {
             2 -> setScale(-1f, 1f); 3 -> setRotate(180f); 4 -> setScale(1f, -1f)
             5 -> { setRotate(90f); postScale(-1f, 1f) }; 6 -> setRotate(90f)

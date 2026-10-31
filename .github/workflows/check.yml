@@ -35,6 +35,14 @@ jobs:
         working-directory: android
         run: ./gradlew --stacktrace :app:testDebugUnitTest :app:lintRelease :app:assembleRelease
 
+      - name: Keep the APK, to try a branch on a phone
+        run: cp android/app/build/outputs/apk/release/app-release.apk "EtTuTiff-${{ github.ref_name }}-${{ github.run_number }}.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: EtTuTiff-*.apk
+          retention-days: 14
+
       - name: Show the lint report
         if: always()
         run: cat android/app/build/intermediates/lint_intermediate_text_report/release/lintReportRelease/lint-results-release.txt || true

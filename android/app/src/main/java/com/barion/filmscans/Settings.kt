@@ -27,6 +27,12 @@ class Settings(app: Application) {
     var deleteInfoFiles by mutableStateOf(prefs.getBoolean("deleteInfoFiles", false))
     /** Give the lab's JPEGs a date taken when unzipping, so galleries sort them by scan date. */
     var labJpegDates by mutableStateOf(prefs.getBoolean("labJpegDates", true))
+    /** Shrinking for sharing: the long side in pixels, JPEG quality, largest zip in MB (0: no limit). */
+    var shareEdge by mutableIntStateOf(prefs.getInt("shareEdge", 1568))
+    var shareQuality by mutableIntStateOf(prefs.getInt("shareQuality", 85))
+    var shareCapMb by mutableIntStateOf(prefs.getInt("shareCapMb", 25))
+    /** Which files to use from a folder holding both TIFFs and JPEGs of the same photos. */
+    var shareUse by mutableStateOf(runCatching { ShareUse.valueOf(prefs.getString("shareUse", "")!!) }.getOrDefault(ShareUse.JPEGS))
     var theme by mutableStateOf(runCatching { AppTheme.valueOf(prefs.getString("theme", "")!!) }.getOrDefault(AppTheme.STUDIO))
 
     /** Past answers, offered in the dropdowns. Never filled in automatically. */
@@ -40,7 +46,9 @@ class Settings(app: Application) {
             .putString("contact", contact.trim()).putInt("quality", quality)
             .putBoolean("keepTiffs", keepTiffs).putString("theme", theme.name)
             .putBoolean("deleteZips", deleteZips).putBoolean("deleteInfoFiles", deleteInfoFiles)
-            .putBoolean("labJpegDates", labJpegDates).apply()
+            .putBoolean("labJpegDates", labJpegDates)
+            .putInt("shareEdge", shareEdge).putInt("shareQuality", shareQuality).putInt("shareCapMb", shareCapMb)
+            .putString("shareUse", shareUse.name).apply()
     }
 
     private fun history(key: String): List<String> =

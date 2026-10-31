@@ -166,9 +166,10 @@ object JpegRetag {
     /**
      * Writes [src] to [out] with its metadata replaced by [segments] (complete APPn/COM segments,
      * e.g. from [Metadata.segments] with no ICC). Everything from the start of the image data to the
-     * end of the file is copied unchanged.
+     * end of the file is copied unchanged. With [keepProfile] false, the colour profile [src] carries
+     * is dropped too, for when [segments] bring the right one.
      */
-    fun rewrite(src: ByteSource, segments: List<ByteArray>, out: OutputStream) {
+    fun rewrite(src: ByteSource, segments: List<ByteArray>, out: OutputStream, keepProfile: Boolean = true) {
         val two = ByteArray(2)
         src.read(0, two)
         if (two[0] != 0xFF.toByte() || two[1] != 0xD8.toByte()) throw TiffException("not a JPEG")
@@ -193,7 +194,7 @@ object JpegRetag {
                 seg.copyOfRange(4, 4 + id.length).contentEquals(id.toByteArray(Charsets.ISO_8859_1))
             when {
                 marker == 0xE0 && starts("JFIF\u0000") -> if (jfif.isEmpty()) jfif += seg
-                marker == 0xE2 && starts("ICC_PROFILE\u0000") -> keepApp += seg
+                marker == 0xE2 && starts("ICC_PROFILE\u0000") -> if (keepProfile) keepApp += seg
                 marker == 0xEE && starts("Adobe") -> keepApp += seg
                 marker in 0xE0..0xEF || marker == 0xFE -> {} // old metadata (EXIF, XMP, IPTC, MPF, comments...): replaced
                 else -> tables += seg

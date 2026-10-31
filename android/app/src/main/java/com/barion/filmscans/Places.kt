@@ -76,8 +76,9 @@ object Places {
     }
 
     /** Opens the folder in My Files (Samsung) or the Files app. */
-    fun openFolder(ctx: Context, o: Output) {
-        val uri = o.roll.outputUri ?: o.roll.folder.uri
+    fun openFolder(ctx: Context, o: Output) = openFolder(ctx, o.roll.outputUri ?: o.roll.folder.uri)
+
+    fun openFolder(ctx: Context, uri: Uri) {
         val path = filePath(uri)
         val id = docId(uri)
         val tries = buildList {

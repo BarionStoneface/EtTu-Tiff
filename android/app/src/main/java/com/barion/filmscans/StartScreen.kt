@@ -20,7 +20,7 @@ import androidx.compose.ui.unit.dp
 /* The first screen, and the wait while folders are read. */
 
 @Composable
-internal fun StartScreen(m: AppModel, pick: () -> Unit, unzip: () -> Unit) {
+internal fun StartScreen(m: AppModel, pick: () -> Unit, unzip: () -> Unit, share: () -> Unit) {
     Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("Turns folders of TIFF scans into full-quality JPEGs, one roll per folder, and tags the lab's own " +
             "JPEGs with the same details without re-saving them.",
@@ -39,7 +39,12 @@ internal fun StartScreen(m: AppModel, pick: () -> Unit, unzip: () -> Unit) {
             "that's in it, and can rename or leave out folders, before anything is written.",
             style = MaterialTheme.typography.bodySmall)
         DeleteZipsSwitch(m)
-        if (m.status.isNotEmpty()) Text(m.status, color = MaterialTheme.colorScheme.error)
+        OutlinedButton(onClick = share, modifier = Modifier.fillMaxWidth()) { Text("Shrink and zip to send") }
+        Text("Pick a folder (an album, or a folder of rolls). Smaller copies of its photos are zipped with the " +
+            "folders kept, split into several zips if they'd be too big, and saved in that folder. The originals " +
+            "aren't touched.", style = MaterialTheme.typography.bodySmall)
+        val err = m.status.ifEmpty { m.share.status.takeIf { m.share.step == null } ?: "" }
+        if (err.isNotEmpty()) Text(err, color = MaterialTheme.colorScheme.error)
     }
 }
 
