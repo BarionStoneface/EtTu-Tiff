@@ -353,7 +353,7 @@ class AppModel {
                         } catch (t: Throwable) {
                             failed.incrementAndGet()
                             withContext(Dispatchers.Main) {
-                                log += "✗ ${roll.name}/${f.name}: ${t.message ?: t.javaClass.simpleName}" + if (keep) "" else " (original kept)"
+                                log += "✗ ${roll.name}/${f.name}: ${t.message ?: t.javaClass.simpleName}" + if (roll.keeps(keep)) "" else " (original kept)"
                             }
                         } finally {
                             withContext(Dispatchers.Main) { done++ }
@@ -361,10 +361,10 @@ class AppModel {
                     }
                 }.awaitAll()
                 val made = roll.files.count { it.done }
-                roll.outputDir = if (roll.jpegRoll && keep) plan.copiesDir else roll.info.folder
+                roll.outputDir = roll.info.folder
                 if (made > 0) outputs += Output(roll, made, roll.outputDir!!, roll.files.firstOrNull { it.done }?.newName?.plus(".jpg"))
-                // Keeping the originals means nothing in the folder is deleted or renamed.
-                if (keep) continue
+                // Keeping the TIFFs means nothing in a TIFF roll's folder is deleted or renamed.
+                if (plan.keepsFolder) continue
                 if (failed.get() > 0) {
                     log += "${roll.name}: ${failed.get()} not done, so its info files and folder name were left alone."
                     continue

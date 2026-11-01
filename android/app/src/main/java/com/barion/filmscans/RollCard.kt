@@ -66,7 +66,7 @@ internal fun RollCard(m: AppModel, r: Roll, onNext: (() -> Unit)?, onPreview: (S
             HorizontalDivider()
             NamesSection(r, onPreview)
             HorizontalDivider()
-            FolderSection(r, m.settings.keepTiffs)
+            FolderSection(r, r.keeps(m.settings.keepTiffs))
             RollProblems(r, m.settings.keepTiffs)
             if (onNext != null) TextButton(onClick = onNext, modifier = Modifier.align(Alignment.End)) { Text("Next roll ↓") }
         }
@@ -240,14 +240,8 @@ private fun NameRow(f: ScanFile, onPreview: (ScanFile) -> Unit) {
 
 @Composable
 private fun FolderSection(r: Roll, keep: Boolean) {
-    if (keep && r.jpegRoll) {
-        OutlinedTextField(r.copiesFolder, { r.copiesFolder = it }, singleLine = true,
-            label = { Text("New folder for the tagged copies") }, modifier = Modifier.fillMaxWidth())
-        Text("It's made next to ${r.name}; the originals stay as they are.", style = MaterialTheme.typography.bodySmall)
-        return
-    }
     if (keep) {
-        Text("Folder name and info files stay as they are (keeping the originals).", style = MaterialTheme.typography.bodySmall)
+        Text("Folder name and info files stay as they are (keeping the TIFFs).", style = MaterialTheme.typography.bodySmall)
         return
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -271,7 +265,7 @@ private fun FolderSection(r: Roll, keep: Boolean) {
 
 @Composable
 private fun RollProblems(r: Roll, keepTiffs: Boolean) {
-    val replacing = r.replacing(keepTiffs)
+    val replacing = r.replacing()
     if (replacing.isNotEmpty()) Row(Modifier.fillMaxWidth().clickable { r.overwrite = !r.overwrite }, verticalAlignment = Alignment.Top) {
         Checkbox(r.overwrite, { r.overwrite = it })
         Text("Replace the JPEG(s) already there with these names: ${replacing.take(6).joinToString()}" +

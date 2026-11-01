@@ -34,10 +34,11 @@ object Convert {
         val f = p.files[i]
         val date = p.scanDate(i) ?: error("no scan date chosen")
         val target = p.names[i] + ".jpg"
-        val dir = if (f.isJpeg && p.keep) copiesDir(p) else p.roll.folder
+        // A lab JPEG is tagged where it is: never copied, so there's only ever one set.
+        val dir = p.roll.folder
         val out = File(dir, target)
         val sameFile = out.absolutePath.equals(f.file.absolutePath, ignoreCase = true)
-        if (f.isJpeg && !p.keep && p.files.withIndex().any { (j, o) -> j != i && o.name.equals(target, true) })
+        if (f.isJpeg && p.files.withIndex().any { (j, o) -> j != i && o.name.equals(target, true) })
             error("$target is another of this roll's JPEGs")
         if (!sameFile && out.exists() && !p.overwrite) error("$target is already there")
 
@@ -71,14 +72,9 @@ object Convert {
             throw e
         }
         val dated = FileTimes.set(out, date)
-        if (!p.keep && !sameFile && !Trash.delete(f.file))
+        if ((f.isJpeg || !p.keep) && !sameFile && !Trash.delete(f.file))
             error(if (f.isJpeg) "tagged as $target, but the original couldn't be removed" else "JPEG saved, but the TIFF couldn't be deleted")
         return dated
-    }
-
-    /** The new folder beside a JPEG roll for its tagged copies, made the first time it's needed. */
-    private fun copiesDir(p: RollPlan): File = synchronized(p) {
-        p.copiesDir.also { if (!it.isDirectory && !it.mkdirs()) error("couldn't create the folder ${it.name}") }
     }
 
     /**

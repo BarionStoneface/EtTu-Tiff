@@ -71,10 +71,11 @@ class Roll(
     var after by mutableStateOf("")
     var newFolderName by mutableStateOf(if (jpegRoll) name else jpegFolderName(name))
     var renameFolder by mutableStateOf(!jpegRoll)
-    /** Keeping the originals of a JPEG roll: the tagged copies go into this new folder beside it. */
-    var copiesFolder by mutableStateOf("$name tagged")
-    /** .thm, .xmp and other info files: only ever deleted when chosen (Settings sets the starting point). */
-    var deleteSidecars by mutableStateOf(deleteInfoFiles)
+    /**
+     * .thm, .xmp and other info files: only ever deleted when chosen. Settings sets the starting point
+     * for TIFF rolls, where it goes with replacing the TIFFs; a lab JPEG roll starts with them kept.
+     */
+    var deleteSidecars by mutableStateOf(deleteInfoFiles && !jpegRoll)
     var dateOverride by mutableStateOf("")
     /** Use the files' own dates on the phone for scans with no date inside: only when chosen, as they may be download dates. */
     var useFileDates by mutableStateOf(false)
@@ -115,7 +116,15 @@ class Roll(
     /** The scans whose date would be the phone's file date. */
     val undatedFiles get() = files.filter { !it.date.embedded }
 
+    /**
+     * Whether this roll's folder is left as it is: TIFF rolls when the TIFFs are kept. A lab JPEG roll
+     * is always tagged where it is, never copied, so its folder can be renamed and its info files
+     * deleted whichever way the TIFFs go.
+     */
+    fun keeps(keepTiffs: Boolean) = keepTiffs && !jpegRoll
+
     fun problems(keepTiffs: Boolean): List<String> {
+        val keep = keeps(keepTiffs)
         val out = mutableListOf<String>()
         val names = files.map { it.newName.lowercase() }
         names.groupingBy { it }.eachCount().filter { it.value > 1 }.keys.forEach { out += "Two files would both be named \"$it.jpg\"" }
@@ -123,50 +132,26 @@ class Roll(
         if (dateOverride.isNotBlank() && overrideDate() == null) out += "Scan date isn't a date (use 2019-04-12 or 2019-04-12 14:30)"
         if (undated > 0 && dateOverride.isBlank() && !useFileDates)
             out += "$undated scan(s) have no scan date: enter it, or choose to use their file dates"
-        val replacing = replacing(keepTiffs)
+        val replacing = replacing()
         if (replacing.isNotEmpty() && !overwrite) out += "${replacing.size} JPEG(s) with these names are already in the folder"
-        if (!keepTiffs && renameFolder) {
+        if (!keep && renameFolder) {
             val n = cleanName(newFolderName)
             if (n.isEmpty()) out += "The new folder name is empty"
             else if (!n.equals(name, true) && n.lowercase() in siblings) out += "There's already a folder called \"$n\" next to this one"
         }
-        if (!keepTiffs && jpegRoll) {
+        if (jpegRoll) {
             // Renaming in place: a new name mustn't be another of these JPEGs' current name.
             val clash = files.firstOrNull { f -> files.any { o -> o !== f && o.name.equals(f.newName + ".jpg", true) } }
             if (clash != null) out += "${clash.newName}.jpg is the name another of these JPEGs has now; change the added text"
-        }
-        if (keepTiffs && jpegRoll) {
-            val n = cleanName(copiesFolder)
-            if (n.isEmpty()) out += "The folder for the tagged copies has no name"
-            else if (n.equals(name, true) || n.lowercase() in siblings)
-                out += "There's already a folder called \"$n\": choose another name for the tagged copies"
-            else if (isRoot) out += "Tagged copies go next to this folder, so pick its parent folder instead (or replace the originals)"
         }
         files.filter { it.error != null }.forEach { out += "${it.name}: ${it.error}" }
         return out
     }
 
-    /**
-     * JPEGs already in the folder that would be written over. A lab JPEG being tagged in place doesn't
-     * count against its own name; tagged copies go into a new, empty folder, so nothing is replaced there.
-     */
-    fun replacing(keepTiffs: Boolean = true): List<String> {
-        if (jpegRoll && keepTiffs) return emptyList()
+    /** JPEGs already in the folder that would be written over. A lab JPEG being tagged in place doesn't count against its own name. */
+    fun replacing(): List<String> {
         val own = if (jpegRoll) files.map { it.name.lowercase() }.toSet() else emptySet()
         return files.map { it.newName + ".jpg" }.filter { it.lowercase() in existing && it.lowercase() !in own }
-    }
-
-    /** Where the JPEGs end up: the roll's folder, or for tagged copies, the folder made for them. */
-    @Volatile var copiesDoc: DocumentFile? = null
-
-    @Synchronized fun copiesDir(): DocumentFile {
-        copiesDoc?.let { return it }
-        val parent = folder.parentFile ?: error("can't make a folder next to this one")
-        val n = cleanName(copiesFolder)
-        val made = parent.createDirectory(n) ?: error("couldn't create the folder $n")
-        copiesDoc = made
-        outputUri = made.uri
-        return made
     }
 
     /** True when a scan's name no longer has the lab's name in it (only possible by editing one by one). */

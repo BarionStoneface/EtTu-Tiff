@@ -120,10 +120,11 @@ fun App(m: AppModel) {
                 val n by remember { derivedStateOf { m.activeRolls.sumOf { it.files.size } } }
                 val blocked by remember { derivedStateOf { m.activeRolls.any { it.problems(m.settings.keepTiffs).isNotEmpty() } } }
                 val replace = !m.settings.keepTiffs
+                val deleting = replace && m.activeRolls.any { !it.jpegRoll }
                 Button(
                     onClick = { confirm = true },
                     enabled = n > 0 && !blocked,
-                    colors = if (replace) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error,
+                    colors = if (deleting) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error,
                         contentColor = MaterialTheme.colorScheme.onError) else ButtonDefaults.buttonColors(),
                     // Above the phone's navigation bar / gesture area, not under it.
                     modifier = Modifier.navigationBarsPadding().fillMaxWidth().padding(16.dp),

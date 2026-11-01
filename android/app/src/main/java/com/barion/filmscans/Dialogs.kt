@@ -58,18 +58,16 @@ private class DryLine(val text: String, val problem: Boolean = false, val headin
  * does it. Nothing is written, deleted or renamed.
  */
 private fun dryRunLines(m: AppModel): List<DryLine> {
-    val keep = m.settings.keepTiffs
     val out = mutableListOf(DryLine("Nothing has been changed. This is what would happen:"))
     for (r in m.activeRolls) {
+        val keep = r.keeps(m.settings.keepTiffs)
         out += DryLine(r.name, heading = true)
         val where = when {
-            r.jpegRoll && keep -> "into a new folder, ${cleanName(r.copiesFolder)}"
             !keep && r.renameFolder && cleanName(r.newFolderName) != r.name -> "here; the folder becomes ${cleanName(r.newFolderName)}"
             else -> "here"
         }
         out += DryLine(when {
-            r.jpegRoll && keep -> "${r.files.size} lab JPEG(s) copied and tagged $where. The originals stay as they are."
-            r.jpegRoll -> "${r.files.size} lab JPEG(s) tagged in place, $where. Pictures not re-saved; old details replaced."
+            r.jpegRoll -> "${r.files.size} lab JPEG(s) tagged in place, $where. No copies; pictures not re-saved; old details replaced."
             keep -> "${r.files.size} TIFF(s) converted to JPEG $where. The TIFFs stay."
             else -> "${r.files.size} TIFF(s) converted to JPEG $where. Each TIFF is deleted once its JPEG is saved and checked."
         })
@@ -84,7 +82,7 @@ private fun dryRunLines(m: AppModel): List<DryLine> {
                 problem = date == null || f.error != null)
             f.error?.let { out += DryLine("   can't be read: $it", problem = true) }
         }
-        val replacing = r.replacing(keep)
+        val replacing = r.replacing()
         if (replacing.isNotEmpty()) out += DryLine((if (r.overwrite) "Replaces " else "Would need to replace ") +
             "JPEG(s) already there: ${replacing.joinToString()}", problem = !r.overwrite)
         if (!keep && r.deleteSidecars && r.sidecars.isNotEmpty())
@@ -128,34 +126,29 @@ internal fun ConfirmDialog(m: AppModel, onDismiss: () -> Unit, onGo: () -> Unit)
     val rolls = m.activeRolls
     val n = rolls.sumOf { it.files.size }
     val replace = !m.settings.keepTiffs
-    val side = if (replace) rolls.filter { it.deleteSidecars }.sumOf { it.sidecars.size } else 0
-    val overwrites = rolls.filter { it.overwrite }.sumOf { it.replacing(m.settings.keepTiffs).size }
+    val side = rolls.filter { !it.keeps(m.settings.keepTiffs) && it.deleteSidecars }.sumOf { it.sidecars.size }
+    val overwrites = rolls.filter { it.overwrite }.sumOf { it.replacing().size }
     val tiffs = rolls.filter { !it.jpegRoll }.sumOf { it.files.size }
     val jpegs = rolls.filter { it.jpegRoll }.sumOf { it.files.size }
-    val renames = if (replace) rolls.filter { it.renameFolder && cleanName(it.newFolderName) != it.name } else emptyList()
+    val renames = rolls.filter { !it.keeps(m.settings.keepTiffs) && it.renameFolder && cleanName(it.newFolderName) != it.name }
+    val deleting = replace && tiffs > 0
     val noFilm = rolls.count { it.film.isBlank() }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(when {
-            replace && tiffs > 0 -> "Convert and DELETE $tiffs TIFFs?"
-            replace -> "Tag $jpegs JPEGs in place?"
-            else -> actionLabel(rolls, false) + "?"
+            deleting -> "Convert and DELETE $tiffs TIFFs?"
+            else -> actionLabel(rolls, replace) + "?"
         }) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (replace) {
-                    if (tiffs > 0) Text("All $tiffs TIFF files will be permanently deleted, each one right after its JPEG is saved " +
-                        "and checked. They will not be in the Recycle bin.",
-                        color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold)
-                    if (jpegs > 0) Text("$jpegs lab JPEG(s) get the new details and names in place; their old details are " +
-                        "replaced. The pictures themselves aren't re-saved.")
-                    if (side > 0) Text("$side info file(s) will also be deleted.")
-                    renames.forEach { Text("Folder renamed: ${it.name} → ${cleanName(it.newFolderName)}") }
-                } else {
-                    if (tiffs > 0) Text("The JPEGs are added next to the TIFFs.")
-                    rolls.filter { it.jpegRoll }.forEach { Text("${it.name}: tagged copies go into a new folder, ${cleanName(it.copiesFolder)}") }
-                    Text("Nothing is deleted or renamed.")
-                }
+                if (deleting) Text("All $tiffs TIFF files will be permanently deleted, each one right after its JPEG is saved " +
+                    "and checked. They will not be in the Recycle bin.",
+                    color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold)
+                else if (tiffs > 0) Text("The JPEGs are added next to the TIFFs, which stay.")
+                if (jpegs > 0) Text("$jpegs lab JPEG(s) get the new details and names where they are, with no copies made. " +
+                    "Their old details are replaced; the pictures themselves aren't re-saved.")
+                if (side > 0) Text("$side info file(s) will also be deleted.")
+                renames.forEach { Text("Folder renamed: ${it.name} → ${cleanName(it.newFolderName)}") }
                 if (overwrites > 0) Text("$overwrites JPEG(s) already in the folders will be replaced.")
                 if (noFilm > 0) Text("$noFilm roll(s) have no film stock set.", color = MaterialTheme.colorScheme.primary)
                 if (m.settings.author.isBlank()) Text("No name set in Settings, so no copyright will be written.",
@@ -167,9 +160,9 @@ internal fun ConfirmDialog(m: AppModel, onDismiss: () -> Unit, onGo: () -> Unit)
         confirmButton = {
             Button(
                 onClick = onGo,
-                colors = if (replace) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error,
+                colors = if (deleting) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error,
                     contentColor = MaterialTheme.colorScheme.onError) else ButtonDefaults.buttonColors(),
-            ) { Text(when { replace && tiffs > 0 -> "Convert and delete"; replace -> "Tag in place"; tiffs > 0 -> "Convert"; else -> "Tag" }) }
+            ) { Text(when { deleting -> "Convert and delete"; tiffs > 0 -> "Convert"; else -> "Tag" }) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Back") } },
     )

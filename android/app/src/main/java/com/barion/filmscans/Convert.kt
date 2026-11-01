@@ -21,7 +21,7 @@ object Convert {
      */
     fun one(ctx: Context, roll: Roll, f: ScanFile, index: Int, meta: RollMeta, credits: Credits, quality: Int,
             keepTiff: Boolean, progress: (Float) -> Unit): Boolean {
-        if (f.isJpeg) return tag(ctx, roll, f, index, meta, credits, keepTiff)
+        if (f.isJpeg) return tag(ctx, roll, f, index, meta, credits)
         val target = f.newName + ".jpg"
         val existing = roll.existing[target.lowercase()]
         if (existing != null && !roll.overwrite) error("$target is already there")
@@ -30,7 +30,7 @@ object Convert {
         try {
             UriSource.open(ctx, f.doc.uri).use { src ->
                 val t = TiffReader(src)
-                val frame = Scan.frame(t, f.name, date, index + 1, rollName(roll, keepTiff))
+                val frame = Scan.frame(t, f.name, date, index + 1, rollName(roll, roll.keeps(keepTiff)))
                 val os = ctx.contentResolver.openOutputStream(outDoc.uri, if (existing != null) "wt" else "w")
                     ?: error("couldn't write $target")
                 BufferedOutputStream(os, 1 shl 16).use { Scan.convert(t, frame, meta, credits, it, quality, progress) }
@@ -52,18 +52,17 @@ object Convert {
     private fun rollName(roll: Roll, keep: Boolean) = if (!keep && roll.renameFolder) cleanName(roll.newFolderName) else roll.name
 
     /**
-     * Tags a lab JPEG without re-saving the picture (see [JpegRetag]). Keeping the originals, the tagged
-     * copy goes into the roll's copies folder. Replacing them, the original is only removed once the
-     * tagged file is written and reads back; under the same name, the new file is written alongside
-     * first and swapped in.
+     * Tags a lab JPEG where it is, without re-saving the picture (see [JpegRetag]): never as a copy, so
+     * there's only ever the one, tagged set. The original is only removed once the tagged file is
+     * written and reads back; under the same name, the new file is written alongside first and swapped in.
      */
-    private fun tag(ctx: Context, roll: Roll, f: ScanFile, index: Int, meta: RollMeta, credits: Credits, keep: Boolean): Boolean {
+    private fun tag(ctx: Context, roll: Roll, f: ScanFile, index: Int, meta: RollMeta, credits: Credits): Boolean {
         val date = scanDate(roll, f)
         val target = f.newName + ".jpg"
-        val sameName = !keep && target.equals(f.name, ignoreCase = true)
-        val dir = if (keep) roll.copiesDir() else roll.folder
-        if (!keep && roll.files.any { it !== f && it.name.equals(target, true) }) error("$target is another of this roll's JPEGs")
-        if (!keep && !sameName) roll.existing[target.lowercase()]?.let { old ->
+        val sameName = target.equals(f.name, ignoreCase = true)
+        val dir = roll.folder
+        if (roll.files.any { it !== f && it.name.equals(target, true) }) error("$target is another of this roll's JPEGs")
+        if (!sameName) roll.existing[target.lowercase()]?.let { old ->
             if (!roll.overwrite) error("$target is already there")
             if (!old.delete()) error("couldn't replace the $target already there")
         }
@@ -72,7 +71,7 @@ object Convert {
         try {
             UriSource.open(ctx, f.doc.uri).use { src ->
                 val info = JpegRetag.info(src)
-                val frame = JpegRetag.frame(info, f.name, date, index + 1, rollName(roll, keep))
+                val frame = JpegRetag.frame(info, f.name, date, index + 1, rollName(roll, false))
                 val os = ctx.contentResolver.openOutputStream(outDoc.uri, "w") ?: error("couldn't write $target")
                 BufferedOutputStream(os, 1 shl 16).use { JpegRetag.rewrite(src, Metadata.segments(frame, meta, credits), it) }
             }
@@ -81,7 +80,6 @@ object Convert {
             runCatching { outDoc.delete() }
             throw e
         }
-        if (keep) return FileDates.set(outDoc.uri, date)
         if (!sameName) {
             if (!f.doc.delete()) error("tagged as $target, but the original couldn't be removed")
             return FileDates.set(outDoc.uri, date)

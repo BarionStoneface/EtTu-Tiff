@@ -353,8 +353,8 @@ class AppModel(private val app: Application) {
                 }.awaitAll()
                 val made = roll.files.count { it.done }
                 if (made > 0) outputs += Output(roll, made, roll.files.firstOrNull { it.done }?.newName?.plus(".jpg"))
-                // Keeping the TIFFs means nothing in the folder is deleted or renamed.
-                if (keep) continue
+                // Keeping the TIFFs means nothing in a TIFF roll's folder is deleted or renamed.
+                if (roll.keeps(keep)) continue
                 if (failed.get() > 0) {
                     log += "${roll.name}: ${failed.get()} not converted, so its info files and folder name were left alone."
                     continue

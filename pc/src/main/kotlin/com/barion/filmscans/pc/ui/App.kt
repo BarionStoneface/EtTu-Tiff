@@ -103,7 +103,8 @@ fun App(m: AppModel, pick: Pickers) {
                 val n by remember { derivedStateOf { m.activeRolls.sumOf { it.files.size } } }
                 val blocked by remember { derivedStateOf { m.activeRolls.any { it.problems(m.settings.keepTiffs).isNotEmpty() } } }
                 BottomButton(
-                    onClick = { confirm = true }, enabled = n > 0 && !blocked, danger = !m.settings.keepTiffs,
+                    onClick = { confirm = true }, enabled = n > 0 && !blocked,
+                    danger = !m.settings.keepTiffs && m.activeRolls.any { !it.jpegRoll },
                     text = if (blocked) "Fix the issues marked in red" else actionLabel(m.activeRolls, !m.settings.keepTiffs),
                 )
             }

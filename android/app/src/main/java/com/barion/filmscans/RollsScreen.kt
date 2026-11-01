@@ -134,56 +134,48 @@ private fun ZipCard(m: AppModel) {
     }
 }
 
-/** "Convert 36 and tag 36, keep the originals". */
+/** "Convert 36 and tag 36, keep the TIFFs". Lab JPEGs are always tagged where they are. */
 internal fun actionLabel(rolls: List<Roll>, replace: Boolean): String {
     val tiffs = rolls.filter { !it.jpegRoll }.sumOf { it.files.size }
     val jpegs = rolls.filter { it.jpegRoll }.sumOf { it.files.size }
     val what = listOfNotNull(tiffs.takeIf { it > 0 }?.let { "Convert $it" }, jpegs.takeIf { it > 0 }?.let { if (tiffs > 0) "tag $it" else "Tag $it" })
         .joinToString(" and ").ifEmpty { "Convert 0" }
     return when {
-        !replace -> "$what, keep the originals"
-        tiffs > 0 -> "$what, delete the TIFFs"
-        else -> "$what in place"
+        tiffs == 0 -> "$what in place"
+        !replace -> "$what, keep the TIFFs"
+        else -> "$what, delete the TIFFs"
     }
 }
 
-/** The one choice that deletes files, stated plainly before anything happens. */
+/** The one choice that deletes files, stated plainly before anything happens. Only TIFFs are ever kept or deleted. */
 @Composable
 private fun ModeCard(m: AppModel) {
     val replace = !m.settings.keepTiffs
-    val hasJpegs = m.shownRolls.any { it.jpegRoll }
-    val hasTiffs = m.shownRolls.any { !it.jpegRoll }
+    if (m.shownRolls.none { !it.jpegRoll }) return
     Card(
         Modifier.fillMaxWidth(),
         colors = if (replace) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer,
             contentColor = MaterialTheme.colorScheme.onErrorContainer) else CardDefaults.cardColors(),
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(if (hasJpegs) "What happens to the originals?" else "What happens to the TIFFs?",
+            Text("What happens to the TIFFs?",
                 style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
             Row(Modifier.fillMaxWidth().clickable { m.settings.keepTiffs = true }, verticalAlignment = Alignment.Top) {
                 RadioButton(selected = m.settings.keepTiffs, onClick = { m.settings.keepTiffs = true })
                 Column(Modifier.padding(top = 12.dp)) {
                     Text("Keep them", fontWeight = FontWeight.SemiBold)
-                    Text(listOfNotNull(
-                        if (hasTiffs) "The JPEGs are added next to the TIFFs." else null,
-                        if (hasJpegs) "The lab's JPEGs are copied, tagged, into a new folder beside each roll." else null,
-                        "Nothing is deleted or renamed.",
-                    ).joinToString(" "), style = MaterialTheme.typography.bodySmall)
+                    Text("The JPEGs are added next to the TIFFs. Nothing is deleted, and the folders keep their names.",
+                        style = MaterialTheme.typography.bodySmall)
                 }
             }
             Row(Modifier.fillMaxWidth().clickable { m.settings.keepTiffs = false }, verticalAlignment = Alignment.Top) {
                 RadioButton(selected = replace, onClick = { m.settings.keepTiffs = false })
                 Column(Modifier.padding(top = 12.dp)) {
-                    Text(if (hasTiffs) "Replace them: DELETE the TIFFs" else "Replace them: tag the JPEGs in place",
+                    Text("Replace them: DELETE the TIFFs",
                         fontWeight = FontWeight.SemiBold,
                         color = if (replace) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.error)
-                    Text(listOfNotNull(
-                        if (hasTiffs) "Each TIFF is permanently deleted once its JPEG is saved and checked. Deleted TIFFs do " +
-                            "not go to the Recycle bin, so keep a backup if you might want them." else null,
-                        if (hasJpegs) "The lab's JPEGs get the new details and names in place. Their pictures aren't " +
-                            "re-saved, but their old details (including any location) are replaced." else null,
-                    ).joinToString(" "), style = MaterialTheme.typography.bodySmall)
+                    Text("Each TIFF is permanently deleted once its JPEG is saved and checked. Deleted TIFFs do " +
+                        "not go to the Recycle bin, so keep a backup if you might want them.", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }

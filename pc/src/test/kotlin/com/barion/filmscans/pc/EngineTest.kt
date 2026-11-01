@@ -97,26 +97,25 @@ class EngineTest {
         assertFalse(File(roll, "Portra_a.jpg.part").exists())
     }
 
-    @Test fun tagsLabJpegsIntoCopiesOrInPlaceWithoutTouchingThePicture() {
+    @Test fun tagsLabJpegsInPlaceWithoutTouchingThePictureAndNeverCopies() {
         val roll = File(tmp, "Lab").apply { mkdirs() }
         val lab = jpeg(segments = listOf(Metadata.segment(0xFE, "lab comment".toByteArray())))
         File(roll, "000001.jpg").writeBytes(lab)
         val info = Rolls.find(roll, mutableListOf()).single()
         assertTrue(info.jpegRoll)
 
-        // Keeping the originals: a new folder beside the roll.
+        // Keeping the TIFFs changes nothing for lab JPEGs: tagged where they are, no second set beside them.
         val keep = RollPlan(info, listOf("000001"), RollMeta(camera = "Nikon FM2"), keep = true, dateText = "2020-01-02")
         assertEquals(emptyList<String>(), keep.problems())
         Convert.one(keep, 0, Credits(), 100)
-        val copy = File(tmp, "Lab tagged/000001.jpg")
-        assertArrayEquals(lab, File(roll, "000001.jpg").readBytes())
-        assertArrayEquals(imageData(lab), imageData(copy.readBytes()))
-        assertFalse(String(copy.readBytes(), Charsets.ISO_8859_1).contains("lab comment"))
-        assertTrue(String(copy.readBytes(), Charsets.ISO_8859_1).contains("Nikon FM2"))
-        // The copies folder now exists, so a second run asks for another name.
-        assertTrue(RollPlan(info, listOf("000001"), RollMeta(), keep = true, dateText = "2020-01-02").problems().any { "already a folder" in it })
+        val tagged = File(roll, "000001.jpg").readBytes()
+        assertArrayEquals(imageData(lab), imageData(tagged))
+        assertFalse(String(tagged, Charsets.ISO_8859_1).contains("lab comment"))
+        assertTrue(String(tagged, Charsets.ISO_8859_1).contains("Nikon FM2"))
+        assertEquals(listOf("Lab"), tmp.listFiles()!!.filter { it.isDirectory }.map { it.name })
+        assertEquals(listOf("000001.jpg"), listed(roll).map { it.name })
 
-        // In place, same name: the tagged file takes the original's place.
+        // Again, under the same name: the tagged file takes the original's place.
         val inPlace = RollPlan(info, listOf("000001"), RollMeta(camera = "Leica M6"), keep = false, dateText = "2020-01-02")
         Convert.one(inPlace, 0, Credits(), 100)
         val now = File(roll, "000001.jpg").readBytes()

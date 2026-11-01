@@ -48,13 +48,13 @@ class Roll(val info: RollInfo, deleteInfoFiles: Boolean) {
     var after by mutableStateOf("")
     var newFolderName by mutableStateOf(if (jpegRoll) name else jpegFolderName(name))
     var renameFolder by mutableStateOf(!jpegRoll)
-    var copiesFolder by mutableStateOf("$name tagged")
-    var deleteSidecars by mutableStateOf(deleteInfoFiles)
+    /** Settings sets the starting point for TIFF rolls, where it goes with replacing the TIFFs; a lab JPEG roll starts with them kept. */
+    var deleteSidecars by mutableStateOf(deleteInfoFiles && !jpegRoll)
     var dateOverride by mutableStateOf("")
     var useFileDates by mutableStateOf(false)
     var overwrite by mutableStateOf(false)
     var include by mutableStateOf(!info.alreadyTagged)
-    /** Where the JPEGs ended up, once done (the folder may have been renamed, or copies made). */
+    /** Where the JPEGs ended up, once done (the folder may have been renamed). */
     var outputDir: File? = null
 
     val undated get() = files.count { !it.date.embedded }
@@ -69,9 +69,11 @@ class Roll(val info: RollInfo, deleteInfoFiles: Boolean) {
     /** Everything chosen, as the conversion and dry run use it. */
     fun plan(keep: Boolean) = RollPlan(
         info, files.map { it.newName }, meta(), keep, dateOverride, useFileDates, overwrite,
-        renameFolder, newFolderName, copiesFolder, deleteSidecars,
+        renameFolder, newFolderName, deleteSidecars,
     )
 
+    /** Whether this roll's folder is left as it is: a TIFF roll whose TIFFs are kept. */
+    fun keeps(keepTiffs: Boolean) = keepTiffs && !jpegRoll
     fun problems(keep: Boolean) = plan(keep).problems()
     fun replacing(keep: Boolean) = plan(keep).replacing()
     fun overrideDate(): LocalDateTime? = Dates.parse(dateOverride.trim())
