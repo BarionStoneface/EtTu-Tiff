@@ -135,6 +135,10 @@ class PlanRoll(val path: String, val files: List<ArchiveFile>) : RollFields {
     override var after by mutableStateOf("")
     override var dateOverride by mutableStateOf("")
 
+    /** Something has been typed for it. */
+    val filled get() = listOf(camera, lens, film, iso, notes, lab, before, after, dateOverride).any { it.isNotBlank() } ||
+        tags.isNotEmpty() || push != 0
+
     /** What the first file will be called, with [rollName] for {roll}. */
     fun example(rollName: String): String {
         val f = files.first()

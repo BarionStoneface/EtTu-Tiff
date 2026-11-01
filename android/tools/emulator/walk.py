@@ -505,7 +505,12 @@ def s_unzip_and_tag():
     if "tagged" in after:
         note("a 'tagged' copies folder was made")
     for f in ("Jpegs/Order 4471/Roll 1/00001.jpg", "Tiffs/Order 4471/Roll 1 JPEG/00001.jpg"):
-        adb("pull", f"/sdcard/Pictures/lab/{f}", os.path.join(OUT, "lab-" + f.split("/")[0] + "-00001.jpg"))
+        local = os.path.join(OUT, "lab-" + f.split("/")[0] + "-00001.jpg")
+        adb("pull", f"/sdcard/Pictures/lab/{f}", local)
+        if not os.path.exists(local):
+            note(f"{f} wasn't there after unzipping and tagging")
+        elif b"Pentax K1000" not in open(local, "rb").read():
+            note(f"{f}: the camera typed in the unzip preview isn't in the photo")
     tap_text(r"^Back to home$")
 
 

@@ -233,9 +233,10 @@ private fun PlanRollDetails(m: AppModel, p: ZipPlan, f: PlanFolder, r: PlanRoll)
             val rollName = (p.names[f.path] ?: f.name).ifBlank { f.name }
             Text("${r.files.first().name} → ${r.example(rollName)}", style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary)
-            // The same roll usually sits under both Jpegs and Tiffs: one set of details for both.
+            // The same roll usually sits under both Jpegs and Tiffs: one set of details for both. Only offered
+            // once something's typed, so a blank roll can't wipe what was typed for its twin.
             val twins = p.rolls.values.filter { it !== r && it.name == r.name }
-            if (twins.isNotEmpty()) TextButton(onClick = { twins.forEach { it.fillFrom(r) } }) {
+            if (twins.isNotEmpty() && r.filled) TextButton(onClick = { twins.forEach { it.fillFrom(r) } }) {
                 Text("Copy these details to the other ${twins.size} \"${r.name}\" folder(s)")
             }
         }
