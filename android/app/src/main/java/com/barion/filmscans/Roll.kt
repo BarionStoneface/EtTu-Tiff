@@ -40,6 +40,31 @@ class ScanFile(
     var thumb by mutableStateOf<ImageBitmap?>(null)
 }
 
+/**
+ * A roll's details as typed: on the rolls screen, or ahead of time in the unzip preview, from
+ * where they're carried onto the roll once it's unzipped.
+ */
+interface RollFields {
+    var camera: String
+    var lens: String
+    var film: String
+    var iso: String
+    var push: Int
+    var tags: Set<String>
+    var notes: String
+    var lab: String
+    var before: String
+    var join: String
+    var after: String
+    var dateOverride: String
+
+    /** Everything typed, from [o]. */
+    fun fillFrom(o: RollFields) {
+        camera = o.camera; lens = o.lens; film = o.film; iso = o.iso; push = o.push; tags = o.tags
+        notes = o.notes; lab = o.lab; before = o.before; join = o.join; after = o.after; dateOverride = o.dateOverride
+    }
+}
+
 @Stable
 class Roll(
     val folder: DocumentFile,
@@ -56,19 +81,19 @@ class Roll(
     val jpegRoll: Boolean = false,
     /** Every JPEG here was already tagged by this app, so the roll starts unticked. */
     val alreadyTagged: Boolean = false,
-) {
-    var camera by mutableStateOf("")
-    var lens by mutableStateOf("")
-    var film by mutableStateOf("")
-    var iso by mutableStateOf("")
-    var push by mutableIntStateOf(0)
-    var tags by mutableStateOf(setOf<String>())
-    var notes by mutableStateOf("")
-    var lab by mutableStateOf("")
+) : RollFields {
+    override var camera by mutableStateOf("")
+    override var lens by mutableStateOf("")
+    override var film by mutableStateOf("")
+    override var iso by mutableStateOf("")
+    override var push by mutableIntStateOf(0)
+    override var tags by mutableStateOf(setOf<String>())
+    override var notes by mutableStateOf("")
+    override var lab by mutableStateOf("")
     /** Text added before and after the lab's file name, which itself is kept whole. */
-    var before by mutableStateOf("")
-    var join by mutableStateOf("_")
-    var after by mutableStateOf("")
+    override var before by mutableStateOf("")
+    override var join by mutableStateOf("_")
+    override var after by mutableStateOf("")
     var newFolderName by mutableStateOf(if (jpegRoll) name else jpegFolderName(name))
     var renameFolder by mutableStateOf(!jpegRoll)
     /**
@@ -76,7 +101,7 @@ class Roll(
      * for TIFF rolls, where it goes with replacing the TIFFs; a lab JPEG roll starts with them kept.
      */
     var deleteSidecars by mutableStateOf(deleteInfoFiles && !jpegRoll)
-    var dateOverride by mutableStateOf("")
+    override var dateOverride by mutableStateOf("")
     /** Use the files' own dates on the phone for scans with no date inside: only when chosen, as they may be download dates. */
     var useFileDates by mutableStateOf(false)
     /** Replace JPEGs already in the folder that have the same names. */

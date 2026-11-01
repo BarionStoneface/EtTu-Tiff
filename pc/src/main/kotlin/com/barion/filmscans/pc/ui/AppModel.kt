@@ -9,6 +9,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import com.barion.filmscans.core.Archive
+import com.barion.filmscans.core.Names
+import com.barion.filmscans.core.ArchiveFile
 import com.barion.filmscans.core.UnzipPlan
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -51,8 +53,40 @@ class ZipPlan(val contents: ZipContents, datesForPhotoZips: Boolean) {
     val skip = mutableStateMapOf<String, Boolean>()
 
     fun build(): UnzipPlan.Result = UnzipPlan.build(contents.listing, top, names.toMap(), skip.filterValues { it }.keys)
+
+    /** Each folder of photos is a roll: its details can be typed here, and are carried onto it once it's unzipped. */
+    val rolls: Map<String, PlanRoll> = contents.listing.files.filter { isImage(it.name) }.groupBy { it.folder }
+        .mapValues { (path, files) -> PlanRoll(path, files.sortedWith { a, b -> UnzipPlan.naturalCompare(a.name, b.name) }) }
+
+    /** Where folder [path] of the zip lands, with the names chosen here. */
+    fun outputDir(path: String): File? = build().targets.firstOrNull { it.file.folder == path }?.dir?.fold(dest) { d, s -> File(d, s) }
     /** The folder the zip unpacks into. */
     val topDir: File get() = cleanName(top).let { if (it.isEmpty()) dest else File(dest, it) }
+}
+
+/** A roll still inside the zip, with the details typed for it in the preview. */
+class PlanRoll(val path: String, val files: List<ArchiveFile>) : RollFields {
+    val name get() = path.substringAfterLast('/')
+    /** The lab's own JPEGs, tagged rather than converted. */
+    val jpegRoll = files.all { isJpeg(it.name) }
+    override var camera by mutableStateOf("")
+    override var lens by mutableStateOf("")
+    override var film by mutableStateOf("")
+    override var iso by mutableStateOf("")
+    override var push by mutableIntStateOf(0)
+    override var tags by mutableStateOf(setOf<String>())
+    override var notes by mutableStateOf("")
+    override var lab by mutableStateOf("")
+    override var before by mutableStateOf("")
+    override var join by mutableStateOf("_")
+    override var after by mutableStateOf("")
+    override var dateOverride by mutableStateOf("")
+
+    /** What the first file will be called, with [rollName] for {roll}. */
+    fun example(rollName: String): String {
+        val f = files.first()
+        return Names.around(stem(f.name), Names.Parts(before, join, after), 1, f.item.time, rollName, film).ifEmpty { stem(f.name) } + ".jpg"
+    }
 }
 
 /**
@@ -127,7 +161,14 @@ class AppModel {
     }
 
     /** [afterUnzip]: nothing to convert there isn't a problem, it just wasn't photos. */
-    private fun scan(where: List<File>, label: String, afterUnzip: Boolean = false) {
+    /** Convert and tag photo zips straight after unzipping them, with the details typed in the preview. */
+    var convertAfterUnzip by mutableStateOf(true)
+
+    /**
+     * [afterUnzip]: nothing to convert there isn't a problem, it just wasn't photos. [carry]: details
+     * typed in the unzip preview, by where each roll landed (its path, lowercase).
+     */
+    private fun scan(where: List<File>, label: String, afterUnzip: Boolean = false, carry: Map<String, PlanRoll> = emptyMap()) {
         roots = where
         rootName = label
         phase = Phase.Scanning
@@ -147,6 +188,30 @@ class AppModel {
             phase = if (any) Phase.Ready else if (afterUnzip) Phase.Unzipped else Phase.Start
             if (!any && found.isSuccess && !afterUnzip) status = "No TIFFs, JPEGs or zips in $label."
             else status = ""
+            if (carry.isNotEmpty() && rolls.isNotEmpty()) carryOn(carry)
+        }
+    }
+
+    /**
+     * Puts the details typed in the unzip preview onto the rolls that came out, then converts and tags
+     * them straight away: one step, as LabUnzip does it. When a roll still needs something (a scan date,
+     * say) or wasn't in the preview, it stops on the rolls screen instead, with what's missing in red.
+     */
+    private fun carryOn(carry: Map<String, PlanRoll>) {
+        var unmatched = 0
+        for (r in rolls) {
+            val p = carry[r.info.folder.absolutePath.lowercase()]
+            if (p == null) { unmatched++; continue }
+            r.fillFrom(p)
+            r.applyNames()
+        }
+        workOn = WorkOn.BOTH
+        if (!convertAfterUnzip) return
+        val blocked = activeRolls.filter { it.problems(settings.keepTiffs).isNotEmpty() }
+        when {
+            unmatched > 0 -> notes += "Not converted yet: $unmatched roll(s) here weren't in the unzip preview. Fill them in below, then convert."
+            blocked.isNotEmpty() -> notes += "Not converted yet: ${blocked.joinToString { it.name }} need(s) what's marked in red below."
+            else -> convert()
         }
     }
 
@@ -223,6 +288,10 @@ class AppModel {
     }
 
     private fun unzip(todo: List<ZipPlan>) {
+        // Where each roll will land, so what was typed for it in the preview can be put on it afterwards.
+        val carry = todo.flatMap { p ->
+            p.rolls.values.mapNotNull { r -> p.outputDir(r.path)?.let { it.absolutePath.lowercase() to r } }
+        }.toMap()
         stop = false
         phase = Phase.Unzipping
         progress = 0f
@@ -284,8 +353,8 @@ class AppModel {
             if (where.isEmpty()) { status = log.joinToString("\n"); phase = Phase.Start; return@launch }
             // Photo zips go on to their rolls. Any other zip ends here, with where its files went.
             when {
-                beforePlan == Phase.Ready -> scan(where, rootName)
-                todo.any { it.photo } -> scan(where, where.joinToString { it.name }, afterUnzip = true)
+                beforePlan == Phase.Ready -> scan(where, rootName, carry = carry)
+                todo.any { it.photo } -> scan(where, where.joinToString { it.name }, afterUnzip = true, carry = carry)
                 else -> phase = Phase.Unzipped
             }
         }

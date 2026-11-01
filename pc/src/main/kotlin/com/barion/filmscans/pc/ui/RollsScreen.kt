@@ -143,9 +143,9 @@ internal fun actionLabel(rolls: List<Roll>, replace: Boolean): String {
 
 /** The one choice that deletes files, stated plainly before anything happens. */
 @Composable
-private fun ModeCard(m: AppModel) {
+internal fun ModeCard(m: AppModel, hasTiffs: Boolean = m.shownRolls.any { !it.jpegRoll }) {
     val replace = !m.settings.keepTiffs
-    if (m.shownRolls.none { !it.jpegRoll }) return
+    if (!hasTiffs) return
     Card(
         Modifier.fillMaxWidth(),
         colors = if (replace) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer,

@@ -466,46 +466,46 @@ def unzip_button():
     raise Stuck(f"Unzip button not found on the preview. Showing: {describe()}")
 
 
-def s_unzip_and_replace():
+def s_unzip_and_tag():
+    """A lab zip, its roll details typed in the preview: unzipped, converted and tagged in one go."""
     pick_zip("lab.zip")
     shot("plan")
     audit("unzip preview")
-    btn = None
-    for _ in range(3):
-        btn = find(r"^Unzip (\d+ file|\()", timeout=3)
-        if btn:
-            break
-        key("KEYCODE_BACK")  # keyboard may be up
-    if btn is None:
-        raise Stuck("Unzip button not found on the preview")
+    n = scroll_to(r"^Camera body$")
+    if n is None:
+        raise Stuck(f"no roll details in the unzip preview. Showing: {describe()}")
+    tap(n)
+    type_text("Pentax K1000")
+    key("KEYCODE_BACK")
+    shot("details-typed")
+    n = scroll_to(r"^Copy these details to the other")
+    if n is None:
+        note("no way to copy a roll's details to its twin (Jpegs and Tiffs both hold Roll 1)")
+    else:
+        tap(n)
+    n = scroll_to(r"^Replace them")
+    if n is None:
+        raise Stuck(f"no Keep/Replace choice for the TIFFs in the preview. Showing: {describe()}")
+    tap(n)
+    shot("replace-chosen")
+    btn = unzip_button()
     if not btn.enabled:
         shot("plan-blocked")
         raise Stuck("Unzip button disabled: " + btn.text)
+    if "tag" not in btn.text:
+        note(f"the Unzip button doesn't say it tags too: '{btn.text}'")
     tap(btn)
     allow_permission_dialogs()
-    wait_for(r"^Unzipped|What happens to the", 10, "for the unzip to finish")
-    shot("unzipped")
-    report.append("```\n" + sh("ls -lR /sdcard/Pictures/lab").strip()[:3000] + "\n```")
-    # Folder holds lab JPEGs and TIFFs: work on both, replace the originals.
-    n = find(r"^Both$", timeout=3)
-    if n:
-        tap(n)
-    tap_text(r"^Replace them")
-    shot("replace-mode")
-    btn = find(r"^(Convert|Tag) .*(delete the TIFFs|in place)$", timeout=5)
-    if btn is None or not btn.enabled:
-        shot("replace-blocked")
-        raise Stuck("replace button missing or disabled")
-    tap(btn)
-    time.sleep(1)
-    shot("confirm-delete")
-    tap_text(r"^(Convert and delete|Tag in place)$")
-    wait_for(r"^Back to home$", 10, "for convert and delete to finish")
-    shot("replaced")
+    wait_for(r"^Back to home$", 10, "for unzip, convert and tag to finish in one go")
+    shot("done")
     after = sh("ls -lR /sdcard/Pictures/lab")
     report.append("```\n" + after.strip()[:3000] + "\n```")
     if re.search(r"\.tif\b", after):
-        note("TIFFs still there after 'Convert and delete'")
+        note("TIFFs still there after unzipping with 'Replace them' chosen")
+    if "tagged" in after:
+        note("a 'tagged' copies folder was made")
+    for f in ("Jpegs/Order 4471/Roll 1/00001.jpg", "Tiffs/Order 4471/Roll 1 JPEG/00001.jpg"):
+        adb("pull", f"/sdcard/Pictures/lab/{f}", os.path.join(OUT, "lab-" + f.split("/")[0] + "-00001.jpg"))
     tap_text(r"^Back to home$")
 
 
@@ -641,7 +641,7 @@ def s_monkey():
     shot("after-monkey")
 
 
-SCENARIOS = [s_cold_start, s_settings, s_convert_keep, s_unzip_and_replace, s_unzip_any, s_back_and_leave,
+SCENARIOS = [s_cold_start, s_settings, s_convert_keep, s_unzip_and_tag, s_unzip_any, s_back_and_leave,
              s_rotation, s_big_text, s_dark, s_process_death, s_monkey]
 
 

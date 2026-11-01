@@ -60,7 +60,9 @@ internal fun RollCard(m: AppModel, r: Roll, onNext: (() -> Unit)?, onPreview: (S
             ThumbStrip(r, onPreview)
             RollFacts(r)
             if (m.shownRolls.size > 1) CopyDetails(r, m.shownRolls)
-            MetaFields(r, m.settings.cameras, m.settings.lenses, m.settings.labs, m.settings.customFilms)
+            MetaFields(r, m.settings.cameras, m.settings.lenses, m.settings.labs, m.settings.customFilms) {
+                if ("{film}" in r.before + r.after) r.applyNames()
+            }
             TagChips(r)
             DateOverride(r)
             HorizontalDivider()
@@ -147,14 +149,16 @@ private fun CopyDetails(r: Roll, rolls: List<Roll>) {
     }
 }
 
+/** Camera, lens, film, ISO, push/pull, notes and lab: here, and in the unzip preview for a roll not unzipped yet. */
 @Composable
-private fun MetaFields(r: Roll, cameras: List<String>, lenses: List<String>, labs: List<String>, customFilms: List<String>) {
+internal fun MetaFields(r: RollFields, cameras: List<String>, lenses: List<String>, labs: List<String>, customFilms: List<String>,
+                        onFilm: () -> Unit = {}) {
     SuggestField("Camera body", r.camera, { r.camera = it }, cameras)
     SuggestField("Lens (optional)", r.lens, { r.lens = it }, lenses)
     val films = remember(customFilms.size) { customFilms + FILM_STOCKS.map { it.name } }
     SuggestField("Film stock", r.film, {
         r.film = it; isoFor(it)?.let { iso -> r.iso = iso.toString() }
-        if ("{film}" in r.before + r.after) r.applyNames()
+        onFilm()
     }, films)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(r.iso, { v -> r.iso = v.filter { it.isDigit() }.take(5) }, label = { Text("Box ISO") },
@@ -174,7 +178,7 @@ private fun MetaFields(r: Roll, cameras: List<String>, lenses: List<String>, lab
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TagChips(r: Roll) {
+internal fun TagChips(r: RollFields) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         PROCESS_TAGS.forEach { tag ->
             FilterChip(selected = tag in r.tags, onClick = { r.tags = if (tag in r.tags) r.tags - tag else r.tags + tag },

@@ -89,13 +89,14 @@ fun App(m: AppModel, pick: Pickers) {
                 val problems by remember { derivedStateOf { m.planProblems() } }
                 val files by remember { derivedStateOf { m.plans.sumOf { p -> p.build().targets.size } } }
                 val bytes by remember { derivedStateOf { m.plans.sumOf { p -> p.build().bytes } } }
+                val then = if (m.convertAfterUnzip && m.plans.any { it.photo && it.rolls.isNotEmpty() }) ", then tag" else ""
                 BottomButton(
                     onClick = { m.startUnzip() }, enabled = problems.isEmpty() && !m.checkingPasswords,
                     text = when {
                         m.checkingPasswords -> "Checking the password…"
                         problems.isNotEmpty() -> "Fix the issues marked in red"
-                        files == 0 -> "Unzip (${sizeText(bytes)})"
-                        else -> "Unzip $files file(s) · ${sizeText(bytes)}"
+                        files == 0 -> "Unzip (${sizeText(bytes)})" + then
+                        else -> "Unzip $files file(s) · ${sizeText(bytes)}" + then
                     },
                 )
             }

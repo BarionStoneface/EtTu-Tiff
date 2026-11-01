@@ -103,6 +103,7 @@ fun App(m: AppModel) {
                 val files by remember { derivedStateOf { m.plans.sumOf { p -> p.build()?.targets?.size ?: 0 } } }
                 val bytes by remember { derivedStateOf { m.plans.sumOf { p -> p.build()?.bytes ?: p.zipSize } } }
                 val streamed = m.plans.any { it.listing == null || it.listing.sealed.isNotEmpty() }
+                val then = if (m.convertAfterUnzip && m.plans.any { it.photo && it.rolls.isNotEmpty() }) ", then tag" else ""
                 Button(
                     onClick = { m.startUnzip() },
                     enabled = problems.isEmpty() && !m.checkingPasswords,
@@ -111,8 +112,8 @@ fun App(m: AppModel) {
                     Text(when {
                         m.checkingPasswords -> "Checking the password…"
                         problems.isNotEmpty() -> "Fix the issues marked in red"
-                        streamed && files == 0 -> "Unzip (${sizeText(bytes)})"
-                        else -> "Unzip $files file(s) · ${sizeText(bytes)}"
+                        streamed && files == 0 -> "Unzip (${sizeText(bytes)})" + then
+                        else -> "Unzip $files file(s) · ${sizeText(bytes)}" + then
                     })
                 }
             }

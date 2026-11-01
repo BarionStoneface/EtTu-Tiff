@@ -176,6 +176,27 @@ class EngineTest {
 
     private data class DateFoundCheck(val source: String, val date: LocalDateTime)
 
+    @Test fun detailsTypedInThePreviewReachTheRollsThatComeOut() {
+        val tiffs = zip(mapOf("Roll 1/000001.tif" to resource("rgb_u8_strips.tif")))
+        val jpegs = zip(mapOf("Roll 1/000001.jpg" to jpeg()))
+        val order = File(tmp, "Order 9.zip").apply { writeBytes(zip(mapOf("Tiffs.zip" to tiffs, "Jpegs.zip" to jpegs), stored = true)) }
+        val dest = File(tmp, "Out").apply { mkdirs() }
+        Unzip.read(order).use { c ->
+            val plan = ZipPlan(c, datesForPhotoZips = true).apply { this.dest = dest; names["Tiffs/Roll 1"] = "Portra" }
+            assertEquals(setOf("Tiffs/Roll 1", "Jpegs/Roll 1"), plan.rolls.keys)
+            plan.rolls.getValue("Tiffs/Roll 1").camera = "Pentax K1000"
+            val where = plan.rolls.values.associate { r -> plan.outputDir(r.path)!!.absolutePath.lowercase() to r }
+            Unzip.run(plan.build(), dest, true, Unzip.Outcome())
+            val found = Rolls.find(File(dest, "Order 9"), mutableListOf())
+            assertEquals(2, found.size)
+            // Every roll that came out is found by where the preview said it would land, renamed folder included.
+            for (info in found) assertTrue(info.folder.path, info.folder.absolutePath.lowercase() in where)
+            val portra = found.single { it.folder.name == "Portra" }
+            val roll = Roll(portra, false).apply { fillFrom(where.getValue(portra.folder.absolutePath.lowercase())) }
+            assertEquals("Pentax K1000", roll.camera)
+        }
+    }
+
     @Test fun unzipsAnyZipLockedOrDeflate64() {
         for (name in listOf("zipcrypto.zip", "aes256.zip", "locked-inner.zip", "deflate64.zip")) {
             val zip = File(tmp, name).apply { writeBytes(this@EngineTest.javaClass.classLoader!!.getResource("zip/$name")!!.readBytes()) }

@@ -86,8 +86,15 @@ class AppModel(private val app: Application) {
         scan(listOf(root), root.name ?: "")
     }
 
-    /** [afterUnzip]: nothing to convert there isn't a problem, it just wasn't photos. */
-    private fun scan(where: List<DocumentFile>, label: String, afterUnzip: Boolean = false) {
+    /** Convert and tag photo zips straight after unzipping them, with the details typed in the preview. */
+    var convertAfterUnzip by mutableStateOf(true)
+
+    /**
+     * [afterUnzip]: nothing to convert there isn't a problem, it just wasn't photos. [carry]: details
+     * typed in the unzip preview, by where each roll landed (its document address, lowercase).
+     */
+    private fun scan(where: List<DocumentFile>, label: String, afterUnzip: Boolean = false,
+                     carry: Map<String, PlanRoll> = emptyMap()) {
         roots = where
         rootName = label
         phase = Phase.Scanning
@@ -106,6 +113,32 @@ class AppModel(private val app: Application) {
             phase = if (any) Phase.Ready else if (afterUnzip) Phase.Unzipped else Phase.Start
             if (!any && found.isSuccess && !afterUnzip) status = "No TIFFs, JPEGs or zips in that folder."
             else status = ""
+            if (carry.isNotEmpty() && rolls.isNotEmpty()) carryOn(carry)
+        }
+    }
+
+    /**
+     * Puts the details typed in the unzip preview onto the rolls that came out, then converts and tags
+     * them straight away: one step, as LabUnzip does it. When a roll still needs something (a scan date,
+     * say) or wasn't in the preview, it stops on the rolls screen instead, with what's missing in red.
+     */
+    private fun carryOn(carry: Map<String, PlanRoll>) {
+        var unmatched = 0
+        for (r in rolls) {
+            val id = runCatching { android.provider.DocumentsContract.getDocumentId(r.folder.uri) }.getOrNull()?.lowercase()
+            val p = id?.let { carry[it] }
+            if (p == null) { unmatched++; continue }
+            r.fillFrom(p)
+            r.applyNames()
+        }
+        workOn = WorkOn.BOTH
+        if (!convertAfterUnzip) return
+        val blocked = activeRolls.filter { it.problems(settings.keepTiffs).isNotEmpty() }
+        when {
+            unmatched > 0 -> notes += "Not converted yet: $unmatched roll(s) weren't in the preview (they were in a compressed " +
+                "zip inside). Fill them in below, then convert."
+            blocked.isNotEmpty() -> notes += "Not converted yet: ${blocked.joinToString { it.name }} need(s) what's marked in red below."
+            else -> convert()
         }
     }
 
@@ -202,6 +235,11 @@ class AppModel(private val app: Application) {
     }
 
     private fun unzip(todo: List<ZipPlan>) {
+        // Where each roll will land, so what was typed for it in the preview can be put on it afterwards.
+        val carry = todo.flatMap { p ->
+            val base = runCatching { android.provider.DocumentsContract.getDocumentId(p.dest.uri) }.getOrNull() ?: return@flatMap emptyList()
+            p.rolls.values.mapNotNull { r -> p.outputPath(r.path)?.let { rel -> (if (rel.isEmpty()) base else "$base/$rel").lowercase() to r } }
+        }.toMap()
         stop = false
         phase = Phase.Unzipping
         log.clear()
@@ -265,8 +303,8 @@ class AppModel(private val app: Application) {
             if (where.isEmpty()) { status = log.joinToString("\n"); phase = Phase.Start; return@launch }
             // Photo zips go on to their rolls. Any other zip ends here, with where its files went.
             when {
-                beforePlan == Phase.Ready -> scan(where, rootName)
-                todo.any { it.photo } -> scan(where, where.joinToString { it.name ?: "" }, afterUnzip = true)
+                beforePlan == Phase.Ready -> scan(where, rootName, carry = carry)
+                todo.any { it.photo } -> scan(where, where.joinToString { it.name ?: "" }, afterUnzip = true, carry = carry)
                 else -> phase = Phase.Unzipped
             }
         }

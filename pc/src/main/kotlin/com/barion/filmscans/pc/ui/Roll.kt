@@ -27,30 +27,55 @@ class ScanFile(val info: ScanInfo) {
 
 /** One roll on screen, with everything you can choose for it. Nothing carries over from another roll by itself. */
 @Stable
-class Roll(val info: RollInfo, deleteInfoFiles: Boolean) {
+/**
+ * A roll's details as typed: on the rolls screen, or ahead of time in the unzip preview, from
+ * where they're carried onto the roll once it's unzipped.
+ */
+interface RollFields {
+    var camera: String
+    var lens: String
+    var film: String
+    var iso: String
+    var push: Int
+    var tags: Set<String>
+    var notes: String
+    var lab: String
+    var before: String
+    var join: String
+    var after: String
+    var dateOverride: String
+
+    /** Everything typed, from [o]. */
+    fun fillFrom(o: RollFields) {
+        camera = o.camera; lens = o.lens; film = o.film; iso = o.iso; push = o.push; tags = o.tags
+        notes = o.notes; lab = o.lab; before = o.before; join = o.join; after = o.after; dateOverride = o.dateOverride
+    }
+}
+
+class Roll(val info: RollInfo, deleteInfoFiles: Boolean) : RollFields {
     val name get() = info.name
     val jpegRoll get() = info.jpegRoll
     val files = info.files.map(::ScanFile)
     val sidecars get() = info.sidecars
     val alreadyTagged get() = info.alreadyTagged
 
-    var camera by mutableStateOf("")
-    var lens by mutableStateOf("")
-    var film by mutableStateOf("")
-    var iso by mutableStateOf("")
-    var push by mutableIntStateOf(0)
-    var tags by mutableStateOf(setOf<String>())
-    var notes by mutableStateOf("")
-    var lab by mutableStateOf("")
+    override var camera by mutableStateOf("")
+    override var lens by mutableStateOf("")
+    override var film by mutableStateOf("")
+    override var iso by mutableStateOf("")
+    override var push by mutableIntStateOf(0)
+    override var tags by mutableStateOf(setOf<String>())
+    override var notes by mutableStateOf("")
+    override var lab by mutableStateOf("")
     /** Text added before and after the lab's file name, which itself is kept whole. */
-    var before by mutableStateOf("")
-    var join by mutableStateOf("_")
-    var after by mutableStateOf("")
+    override var before by mutableStateOf("")
+    override var join by mutableStateOf("_")
+    override var after by mutableStateOf("")
     var newFolderName by mutableStateOf(if (jpegRoll) name else jpegFolderName(name))
     var renameFolder by mutableStateOf(!jpegRoll)
     /** Settings sets the starting point for TIFF rolls, where it goes with replacing the TIFFs; a lab JPEG roll starts with them kept. */
     var deleteSidecars by mutableStateOf(deleteInfoFiles && !jpegRoll)
-    var dateOverride by mutableStateOf("")
+    override var dateOverride by mutableStateOf("")
     var useFileDates by mutableStateOf(false)
     var overwrite by mutableStateOf(false)
     var include by mutableStateOf(!info.alreadyTagged)

@@ -3,13 +3,16 @@ package com.barion.filmscans
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.documentfile.provider.DocumentFile
 import androidx.exifinterface.media.ExifInterface
 import com.barion.filmscans.core.Archive
+import com.barion.filmscans.core.ArchiveFile
 import com.barion.filmscans.core.BytesSource
 import com.barion.filmscans.core.DateFound
 import com.barion.filmscans.core.Dates
@@ -100,10 +103,44 @@ class ZipPlan(
     val skip = mutableStateMapOf<String, Boolean>()
 
     fun build(): UnzipPlan.Result? = listing?.let { UnzipPlan.build(it, top, names.toMap(), skip.filterValues { v -> v }.keys) }
+
+    /** Each folder of photos is a roll: its details can be typed here, and are carried onto it once it's unzipped. */
+    val rolls: Map<String, PlanRoll> = listing?.files?.filter { isImage(it.name) }?.groupBy { it.folder }
+        ?.mapValues { (path, files) -> PlanRoll(path, files.sortedWith { a, b -> UnzipPlan.naturalCompare(a.name, b.name) }) }
+        ?: emptyMap()
+
+    /** Where folder [path] of the zip lands, under the destination, with the names chosen here. */
+    fun outputPath(path: String): String? = build()?.targets?.firstOrNull { it.file.folder == path }?.dir?.joinToString("/")
     fun hasJpegs() = listing?.files?.any { isJpeg(it.name) } ?: true
     fun close() = runCatching { source?.close() }
 }
 
+
+/** A roll still inside the zip, with the details typed for it in the preview. */
+@Stable
+class PlanRoll(val path: String, val files: List<ArchiveFile>) : RollFields {
+    val name get() = path.substringAfterLast('/')
+    /** The lab's own JPEGs, tagged rather than converted. */
+    val jpegRoll = files.all { isJpeg(it.name) }
+    override var camera by mutableStateOf("")
+    override var lens by mutableStateOf("")
+    override var film by mutableStateOf("")
+    override var iso by mutableStateOf("")
+    override var push by mutableIntStateOf(0)
+    override var tags by mutableStateOf(setOf<String>())
+    override var notes by mutableStateOf("")
+    override var lab by mutableStateOf("")
+    override var before by mutableStateOf("")
+    override var join by mutableStateOf("_")
+    override var after by mutableStateOf("")
+    override var dateOverride by mutableStateOf("")
+
+    /** What the first file will be called, with [rollName] for {roll}. */
+    fun example(rollName: String): String {
+        val f = files.first()
+        return Names.around(stem(f.name), Names.Parts(before, join, after), 1, f.item.time, rollName, film).ifEmpty { stem(f.name) } + ".jpg"
+    }
+}
 
 /** Unzips a download, zips inside it included, following a plan you've checked. */
 object Unzip {
