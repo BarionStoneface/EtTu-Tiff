@@ -25,7 +25,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.barion.filmscans.core.ArchiveFile
 import com.barion.filmscans.core.PlanFolder
 
 /**
@@ -108,6 +110,7 @@ private fun FolderRow(p: ZipPlan, f: PlanFolder) {
                 if (f.sealed) add("a compressed zip unpacks here")
             }.joinToString(" · ")
             Text(if (left) "Left out" else info, style = MaterialTheme.typography.bodySmall)
+            if (!left && f.files > 0) p.contents.listing.let { l -> FilePeek(remember(l, f.path) { l.files.filter { it.folder == f.path } }) }
             if (!left) p.contents.dateSummary[f.path]?.let { (sources, undated) ->
                 if (sources.isNotEmpty()) Text("Scan dates from: " + sources.entries.sortedByDescending { it.value }
                     .joinToString { "${plainSource(it.key)} (${it.value})" }, style = MaterialTheme.typography.bodySmall)
@@ -131,8 +134,11 @@ private fun PlanFooter(p: ZipPlan) {
     val res by remember(p) { derivedStateOf { p.build() } }
     val looseFiles = p.contents.listing.files.count { it.folder.isEmpty() }
     Column(Modifier.padding(start = 12.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        if (looseFiles > 0) Text("$looseFiles file(s) at the top of the zip go straight into the folder to make.",
-            style = MaterialTheme.typography.bodySmall)
+        if (looseFiles > 0) {
+            Text("$looseFiles file(s) at the top of the zip go straight into the folder to make:",
+                style = MaterialTheme.typography.bodySmall)
+            p.contents.listing.let { l -> FilePeek(remember(l) { l.files.filter { it.folder.isEmpty() } }) }
+        }
         val example = res.targets.firstOrNull { isImage(it.name) } ?: res.targets.firstOrNull()
         if (example != null) Text("e.g. ${java.io.File(p.dest, example.path).path}", style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.primary)
@@ -159,4 +165,32 @@ private fun PasswordField(p: ZipPlan) {
         },
         modifier = Modifier.fillMaxWidth(),
     )
+}
+
+/**
+ * The files in one folder of the zip, as LabUnzip shows them: the first few, then how many more,
+ * with a way to see every one. Name, size and its date in the zip, read from the zip's directory.
+ */
+@Composable
+private fun FilePeek(files: List<ArchiveFile>) {
+    var all by remember { mutableStateOf(false) }
+    val shown = if (all) files else files.take(6)
+    Column(Modifier.padding(top = 2.dp, bottom = 2.dp)) {
+        for (f in shown) Row(Modifier.fillMaxWidth()) {
+            Text((if (f.item.encrypted) "🔒 " else "") + f.name, style = MaterialTheme.typography.bodySmall,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Text(" " + fileSize(f.size) + (f.item.time?.let { " · " + MINUTE.format(it) } ?: ""),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (files.size > 6) TextButton(onClick = { all = !all }) {
+            Text(if (all) "Show fewer" else "and ${files.size - 6} more: show all")
+        }
+    }
+}
+
+/** "740 KB", "35 MB": small files aren't rounded up to a megabyte. */
+private fun fileSize(b: Long) = when {
+    b < 1_000 -> "$b B"
+    b < 1_000_000 -> "${(b + 999) / 1000} KB"
+    else -> sizeText(b)
 }

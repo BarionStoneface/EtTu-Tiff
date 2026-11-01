@@ -368,7 +368,7 @@ def s_convert_keep():
     else:
         tap(n)
         shot("rolls-dates")
-    btn = find(r"keep the originals$", timeout=5)
+    btn = find(r"keep the TIFFs$", timeout=5)
     if btn is None:
         raise Stuck("convert button not found")
     if not btn.enabled:

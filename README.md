@@ -62,8 +62,9 @@ anyway" carries on. It does the same as the phone app, plus:
   comment. You choose "all rights reserved" or a Creative Commons licence.
 - **Unzips lab downloads, with a preview first.** Pick the zip, including one
   that holds `Jpegs.zip` and `Tiffs.zip`, or a zip per roll. Before anything
-  is written you see every folder it will make, with where each roll's scan
-  dates come from. Rename a folder, clear a name to drop that level, or untick
+  is written you see every folder it will make, the files in each (name, size
+  and date, the first few then "show all", as LabUnzip shows them), and where
+  each roll's scan dates come from. Rename a folder, clear a name to drop that level, or untick
   a folder (say, the lab's JPEGs) to leave it out. Two files that would land
   on the same name stop it. Inner zips are read where they sit inside the
   outer one, so even a 13 GB `Tiffs.zip` is listed straight away, and
@@ -94,8 +95,8 @@ anyway" carries on. It does the same as the phone app, plus:
   same roll details, copyright, dates and names as a converted scan, but the
   picture data is copied byte for byte, so nothing about the image changes.
   Their old details, location included, are replaced; the colour profile is
-  kept. Keeping the originals puts tagged copies in a new folder beside the
-  roll; replacing them tags them in place.
+  kept. They're always tagged where they are: no second, untagged set is left
+  beside them. Keeping or replacing is only ever about the TIFFs.
 - **Reads the TIFFs scanners and editors write.** 1 to 16-bit (including
   packed 2, 4 and 12-bit), 32-bit and floating-point (16, 32 and 64-bit),
   BigTIFF over 4 GB, strips or tiles, and no compression, LZW, Deflate,
