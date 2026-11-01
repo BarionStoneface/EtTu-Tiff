@@ -1,6 +1,12 @@
 package com.barion.filmscans.pc
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.toComposeImageBitmap
+import javax.imageio.ImageIO
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,7 +30,13 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 internal fun StartScreen(m: AppModel, pick: Pickers) {
+    // The crooked horizon mark; the window and installer icon is the film strip.
+    val mark = remember {
+        runCatching { BitmapPainter(ImageIO.read(AppModel::class.java.getResourceAsStream("/start_mark.png")).toComposeImageBitmap()) }.getOrNull()
+    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        if (mark != null) Image(mark, contentDescription = "Et Tu, Tiff?",
+            modifier = Modifier.width(220.dp).align(Alignment.CenterHorizontally))
         Text("Turns folders of TIFF scans into full-quality JPEGs, one roll per folder, and tags the lab's own " +
             "JPEGs with the same details without re-saving them.", style = MaterialTheme.typography.bodyLarge)
         Text("Keeps the pixels, colour profile, DPI, scanner and original scan date. Drops location and " +

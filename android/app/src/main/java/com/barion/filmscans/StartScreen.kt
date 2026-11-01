@@ -1,5 +1,6 @@
 package com.barion.filmscans
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -7,6 +8,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -15,13 +19,17 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 
 /* The first screen, and the wait while folders are read. */
 
 @Composable
 internal fun StartScreen(m: AppModel, pick: () -> Unit, unzip: () -> Unit) {
-    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        // The crooked horizon mark; the launcher icon is the film strip.
+        Image(painterResource(R.drawable.start_mark), contentDescription = "Et Tu, Tiff?",
+            modifier = Modifier.width(200.dp).align(Alignment.CenterHorizontally))
         Text("Turns folders of TIFF scans into full-quality JPEGs, one roll per folder, and tags the lab's own " +
             "JPEGs with the same details without re-saving them.",
             style = MaterialTheme.typography.bodyLarge)
