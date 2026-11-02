@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.toComposeImageBitmap
 import com.barion.filmscans.core.Archive
 import com.barion.filmscans.core.Names
 import com.barion.filmscans.core.ArchiveFile
+import com.barion.filmscans.core.ZipPeek
 import com.barion.filmscans.core.UnzipPlan
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +45,9 @@ class ZipPlan(val contents: ZipContents, datesForPhotoZips: Boolean) {
     val needsPassword get() = contents.listing.needsPassword
     var password by mutableStateOf("")
     var passwordWrong by mutableStateOf(false)
+    /** Thumbnails of the photos in it, by path in the zip, made as they come on screen. */
+    val thumbs = mutableStateMapOf<String, androidx.compose.ui.graphics.ImageBitmap>()
+    val thumbsTried = java.util.Collections.synchronizedSet(HashSet<String>())
     /** Where it unzips: next to the zip unless you choose somewhere else. */
     var dest by mutableStateOf<File>(contents.zip.absoluteFile.parentFile)
     var top by mutableStateOf(cleanName(stem(contents.zip.name)).ifEmpty { "Unzipped" })
@@ -250,6 +254,35 @@ class AppModel {
     }
 
     private fun closePlans() { plans.forEach { runCatching { it.contents.close() } }; plans.clear() }
+
+    // ---- looking inside a zip before unzipping it
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val peekWork = Dispatchers.IO.limitedParallelism(3)
+    /** Files pulled out of zips to be looked at; gone when the app closes. */
+    private val peekDir by lazy { java.nio.file.Files.createTempDirectory("ettutiff-peek").toFile().apply { deleteOnExit() } }
+
+    /** Makes the thumbnail of a photo in the zip, once, when its row comes on screen. */
+    fun thumb(p: ZipPlan, f: ArchiveFile) {
+        if (!isImage(f.name) || (f.item.encrypted && p.password.isEmpty()) || !p.thumbsTried.add(f.path)) return
+        scope.launch(peekWork) {
+            Previews.fromZip(f, p.password.ifEmpty { null }, 160)?.toComposeImageBitmap()
+                ?.let { withContext(Dispatchers.Main) { p.thumbs[f.path] = it } }
+        }
+    }
+
+    /** Opens one file from the zip in its usual app, pulling out only that file. */
+    fun openInZip(p: ZipPlan, f: ArchiveFile) {
+        if (f.item.encrypted && p.password.isEmpty()) { status = "Type the zip's password first."; return }
+        status = "Opening ${f.name}…"
+        scope.launch {
+            val out = withContext(Dispatchers.IO) {
+                runCatching { ZipPeek.extract(f, p.password.ifEmpty { null }, File(peekDir, f.path.hashCode().toUInt().toString(16))).also { it.deleteOnExit() } }
+            }
+            status = out.fold({ if (Shell.open(it)) "" else "Nothing on this PC opens .${ext(f.name)} files." },
+                { if (it is com.barion.filmscans.core.WrongPassword) "That password doesn't open it." else "Couldn't open ${f.name}: ${it.message}" })
+        }
+    }
 
     /** Problems that stop the plan, across all the zips. */
     fun planProblems(): List<String> {

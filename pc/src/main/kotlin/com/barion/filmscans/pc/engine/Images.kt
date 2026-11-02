@@ -1,6 +1,8 @@
 package com.barion.filmscans.pc
 
+import com.barion.filmscans.core.ArchiveFile
 import com.barion.filmscans.core.Thumbs
+import com.barion.filmscans.core.ZipPeek
 import com.barion.filmscans.core.TiffReader
 import java.awt.geom.AffineTransform
 import java.awt.image.AffineTransformOp
@@ -54,6 +56,22 @@ object Previews {
             reader.dispose()
         }
     }
+
+    /** A picture of a scan or photo still inside a zip, [maxSide] pixels at most; null when it isn't one. */
+    fun fromZip(f: ArchiveFile, password: String?, maxSide: Int): BufferedImage? = runCatching {
+        if (isJpeg(f.name)) ZipPeek.open(f, password).use { input ->
+            ImageIO.createImageInputStream(input).use { iis ->
+                val reader = ImageIO.getImageReaders(iis).asSequence().firstOrNull() ?: return@runCatching null
+                try {
+                    reader.input = iis
+                    val step = maxOf(1, maxOf(reader.getWidth(0), reader.getHeight(0)) / maxSide)
+                    reader.read(0, reader.defaultReadParam.apply { setSourceSubsampling(step, step, 0, 0) })
+                } finally { reader.dispose() }
+            }
+        } else ZipPeek.tiffThumb(f, password, maxSide)?.let { th ->
+            BufferedImage(th.width, th.height, BufferedImage.TYPE_INT_RGB).apply { setRGB(0, 0, th.width, th.height, th.argb, 0, th.width) }
+        }
+    }.getOrNull()
 
     /** Applies an EXIF orientation (1-8) to the pixels, for showing on screen only. */
     fun turn(img: BufferedImage, o: Int): BufferedImage {

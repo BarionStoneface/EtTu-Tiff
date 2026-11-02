@@ -471,6 +471,20 @@ def s_unzip_and_tag():
     pick_zip("lab.zip")
     shot("plan")
     audit("unzip preview")
+    # Looking at a photo still in the zip.
+    n = find(r"^00001\.jpg$", timeout=5)
+    if n is None:
+        note("the files in the zip aren't listed in the preview")
+    else:
+        time.sleep(2)
+        shot("thumbnails")
+        tap(n)
+        if find(r"^Open in another app$", timeout=15) is None:
+            note("tapping a photo in the zip didn't show it")
+        else:
+            time.sleep(2)
+            shot("photo-from-zip")
+            tap_text(r"^Close$")
     n = scroll_to(r"^Camera body$")
     if n is None:
         raise Stuck(f"no roll details in the unzip preview. Showing: {describe()}")
@@ -541,6 +555,20 @@ def s_unzip_any():
     if not btn.enabled:
         shot("blocked")
         raise Stuck("Unzip button disabled with the right password: " + btn.text)
+    # Opening a file that isn't a photo, without unzipping: it goes to whatever app opens text.
+    n = scroll_to(r"^notes\.txt$")
+    if n:
+        before = foreground()
+        tap(n)
+        time.sleep(4)
+        now = foreground()
+        report.append(f"- tapping notes.txt in the zip opened: {now}")
+        shot("txt-from-zip")
+        if PKG in now and "No app" not in describe():
+            note("tapping notes.txt in the zip opened nothing")
+        key("KEYCODE_BACK")
+        launch(cold=False)
+        btn = unzip_button()
     tap(btn)
     allow_permission_dialogs()
     wait_for(r"^Unzipped — ", 5, "for the Unzipped screen")

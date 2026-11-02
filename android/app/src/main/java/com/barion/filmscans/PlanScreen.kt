@@ -1,23 +1,33 @@
 package com.barion.filmscans
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,6 +35,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -41,6 +53,7 @@ import com.barion.filmscans.core.PlanFolder
 @Composable
 fun PlanScreen(m: AppModel) {
     val problems by remember { derivedStateOf { m.planProblems() } }
+    m.peek?.let { PeekDialog(m, it) }
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(12.dp),
@@ -48,12 +61,13 @@ fun PlanScreen(m: AppModel) {
     ) {
         item {
             Text("Nothing is written until you press Unzip. Rename any folder, clear a name to drop that level " +
-                "(what's in it moves up), or untick a folder to leave it out.", style = MaterialTheme.typography.bodySmall)
+                "(what's in it moves up), or untick a folder to leave it out. Tap a file to look at it.",
+                style = MaterialTheme.typography.bodySmall)
         }
         for (p in m.plans) {
             item(key = "head:" + p.uri) { PlanHeader(p) }
             items(p.folders, key = { "f:" + p.uri + "/" + it.path }) { f -> FolderRow(m, p, f) }
-            item(key = "foot:" + p.uri) { PlanFooter(p) }
+            item(key = "foot:" + p.uri) { PlanFooter(m, p) }
         }
         if (problems.isNotEmpty()) item {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -123,7 +137,7 @@ private fun FolderRow(m: AppModel, p: ZipPlan, f: PlanFolder) {
                 if (f.sealed) add("a compressed zip unpacks here")
             }.joinToString(" · ")
             Text(if (left) "Left out" else info, style = MaterialTheme.typography.bodySmall)
-            if (!left && f.files > 0) p.listing?.let { l -> FilePeek(remember(l, f.path) { l.files.filter { it.folder == f.path } }) }
+            if (!left && f.files > 0) p.listing?.let { l -> FilePeek(m, p, remember(l, f.path) { l.files.filter { it.folder == f.path } }) }
             if (!left) p.dateSummary[f.path]?.let { (sources, undated) ->
                 if (sources.isNotEmpty()) Text("Scan dates from: " + sources.entries.sortedByDescending { it.value }
                     .joinToString { "${plainSource(it.key)} (${it.value})" }, style = MaterialTheme.typography.bodySmall)
@@ -144,7 +158,7 @@ private fun FolderRow(m: AppModel, p: ZipPlan, f: PlanFolder) {
 }
 
 @Composable
-private fun PlanFooter(p: ZipPlan) {
+private fun PlanFooter(m: AppModel, p: ZipPlan) {
     val r by remember(p) { derivedStateOf { p.build() } }
     val res = r ?: return
     val looseFiles = p.listing?.files?.count { it.folder.isEmpty() } ?: 0
@@ -152,7 +166,7 @@ private fun PlanFooter(p: ZipPlan) {
         if (looseFiles > 0) {
             Text("$looseFiles file(s) at the top of the zip go straight into the folder to make:",
                 style = MaterialTheme.typography.bodySmall)
-            p.listing?.let { l -> FilePeek(remember(l) { l.files.filter { it.folder.isEmpty() } }) }
+            p.listing?.let { l -> FilePeek(m, p, remember(l) { l.files.filter { it.folder.isEmpty() } }) }
         }
         val example = res.targets.firstOrNull { isImage(it.name) } ?: res.targets.firstOrNull()
         if (example != null) Text("e.g. ${example.path}", style = MaterialTheme.typography.bodySmall,
@@ -186,24 +200,54 @@ private fun PasswordField(p: ZipPlan) {
 }
 
 /**
- * The files in one folder of the zip, as LabUnzip shows them: the first few, then how many more,
- * with a way to see every one. Name, size and its date in the zip, read from the zip's directory.
+ * The files in one folder of the zip: the first few, then how many more, with a way to see every one.
+ * Each shows a thumbnail when it's a photo, its size and its date in the zip, and opens when tapped:
+ * a photo here, anything else in the app for it. Nothing else in the zip is unzipped to do it.
  */
 @Composable
-private fun FilePeek(files: List<ArchiveFile>) {
+private fun FilePeek(m: AppModel, p: ZipPlan, files: List<ArchiveFile>) {
     var all by remember { mutableStateOf(false) }
     val shown = if (all) files else files.take(6)
-    Column(Modifier.padding(top = 2.dp, bottom = 2.dp)) {
-        for (f in shown) Row(Modifier.fillMaxWidth()) {
-            Text((if (f.item.encrypted) "🔒 " else "") + f.name, style = MaterialTheme.typography.bodySmall,
-                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            Text(" " + fileSize(f.size) + (f.item.time?.let { " · " + MINUTE.format(it) } ?: ""),
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Column(Modifier.padding(top = 2.dp, bottom = 2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        for (f in shown) Row(
+            Modifier.fillMaxWidth().clickable(onClickLabel = "Open ${f.name}") { m.openInZip(p, f) }.padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            LaunchedEffect(f.path, p.password) { m.thumb(p, f) }
+            Box(Modifier.size(44.dp).clip(RoundedCornerShape(4.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center) {
+                val t = p.thumbs[f.path]
+                if (t != null) Image(t, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.matchParentSize())
+                else Text(if (f.item.encrypted) "🔒" else ext(f.name).take(4).uppercase(), style = MaterialTheme.typography.labelSmall)
+            }
+            Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                Text(f.name, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(fileSize(f.size) + (f.item.time?.let { " · " + MINUTE.format(it) } ?: ""),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
         if (files.size > 6) TextButton(onClick = { all = !all }) {
             Text(if (all) "Show fewer" else "and ${files.size - 6} more: show all")
         }
     }
+}
+
+/** A photo from the zip, big, with a way to open it in another app. */
+@Composable
+internal fun PeekDialog(m: AppModel, peek: AppModel.Peek) {
+    AlertDialog(
+        onDismissRequest = { m.peek = null },
+        title = { Text(peek.file.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        text = {
+            Box(Modifier.fillMaxWidth().heightIn(min = 160.dp), contentAlignment = Alignment.Center) {
+                val pic = peek.picture
+                if (pic == null) CircularProgressIndicator()
+                else Image(pic, contentDescription = peek.file.name, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = { TextButton(onClick = { m.peek = null }) { Text("Close") } },
+        dismissButton = { TextButton(onClick = { m.peek = null; m.openInZip(peek.plan, peek.file, elsewhere = true) }) { Text("Open in another app") } },
+    )
 }
 
 /** "740 KB", "35 MB": small files aren't rounded up to a megabyte. */

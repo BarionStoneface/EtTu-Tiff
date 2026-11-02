@@ -6,7 +6,9 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import com.barion.filmscans.core.ArchiveFile
 import com.barion.filmscans.core.Thumbs
+import com.barion.filmscans.core.ZipPeek
 import com.barion.filmscans.core.TiffReader
 
 /** Small previews for the rolls screen, decoded straight from the scans. */
@@ -31,6 +33,19 @@ object Thumbnails {
         val m = orientationMatrix(f.orientation)
         if (!m.isIdentity) bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
         bmp.asImageBitmap()
+    }.getOrNull()
+
+    /** A picture of a scan or photo still inside a zip, [maxSide] pixels at most; null when it isn't one. */
+    fun fromZip(f: ArchiveFile, password: String?, maxSide: Int): ImageBitmap? = runCatching {
+        if (isJpeg(f.name)) {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            ZipPeek.open(f, password).use { BitmapFactory.decodeStream(it, null, bounds) }
+            val sample = Integer.highestOneBit(maxOf(1, maxOf(bounds.outWidth, bounds.outHeight) / maxSide))
+            ZipPeek.open(f, password).use { BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample }) }
+                ?.asImageBitmap()
+        } else ZipPeek.tiffThumb(f, password, maxSide)?.let { th ->
+            Bitmap.createBitmap(th.argb, th.width, th.height, Bitmap.Config.ARGB_8888).asImageBitmap()
+        }
     }.getOrNull()
 
     private fun orientationMatrix(o: Int) = Matrix().apply {

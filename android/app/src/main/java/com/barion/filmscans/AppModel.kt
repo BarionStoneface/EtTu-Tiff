@@ -10,6 +10,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.documentfile.provider.DocumentFile
 import com.barion.filmscans.core.Archive
+import com.barion.filmscans.core.ArchiveFile
+import com.barion.filmscans.core.ZipPeek
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CoroutineScope
@@ -85,6 +87,67 @@ class AppModel(private val app: Application) {
         unzipped.clear(); notes.clear()
         scan(listOf(root), root.name ?: "")
     }
+
+    // ---- looking inside a zip before unzipping it
+
+    /** A photo from a zip, shown big; [picture] is null while it's being read. */
+    class Peek(val plan: ZipPlan, val file: ArchiveFile, val picture: androidx.compose.ui.graphics.ImageBitmap?)
+    var peek by mutableStateOf<Peek?>(null)
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val peekWork = Dispatchers.IO.limitedParallelism(2)
+
+    /** Makes the thumbnail of a photo in the zip, once, when its row comes on screen. */
+    fun thumb(p: ZipPlan, f: ArchiveFile) {
+        if (!isImage(f.name) || (f.item.encrypted && p.password.isEmpty()) || !p.thumbsTried.add(f.path)) return
+        scope.launch(peekWork) {
+            if (typing) delay(300)
+            Thumbnails.fromZip(f, p.password.ifEmpty { null }, 160)?.let { withContext(Dispatchers.Main) { p.thumbs[f.path] = it } }
+        }
+    }
+
+    /**
+     * Opens one file from the zip without unzipping the rest. A photo is shown here, big; anything else
+     * (or a photo, from there) is pulled out on its own into the app's cache and opened in the app that
+     * handles that kind of file.
+     */
+    fun openInZip(p: ZipPlan, f: ArchiveFile, elsewhere: Boolean = false) {
+        if (f.item.encrypted && p.password.isEmpty()) { toast("Type the zip's password first"); return }
+        val password = p.password.ifEmpty { null }
+        if (isImage(f.name) && !elsewhere) {
+            peek = Peek(p, f, null)
+            scope.launch(peekWork) {
+                val big = Thumbnails.fromZip(f, password, 1600)
+                withContext(Dispatchers.Main) {
+                    if (peek?.file !== f) return@withContext
+                    if (big == null) { peek = null; openInZip(p, f, elsewhere = true) } else peek = Peek(p, f, big)
+                }
+            }
+            return
+        }
+        toast("Opening ${f.name}…")
+        scope.launch {
+            val file = withContext(Dispatchers.IO) {
+                runCatching {
+                    val dir = java.io.File(app.cacheDir, "zip-peek")
+                    // Only the latest few are kept: these are for looking at, not keeping.
+                    dir.listFiles()?.sortedBy { it.lastModified() }?.dropLast(4)?.forEach { it.delete() }
+                    ZipPeek.extract(f, password, dir)
+                }
+            }
+            file.onFailure { toast(if (it is com.barion.filmscans.core.WrongPassword) "That password doesn't open it" else "Couldn't open ${f.name}: ${it.message}") }
+            file.onSuccess { out ->
+                val uri = androidx.core.content.FileProvider.getUriForFile(app, app.packageName + ".peek", out)
+                val mime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext(f.name)) ?: "application/octet-stream"
+                val view = android.content.Intent(android.content.Intent.ACTION_VIEW).setDataAndType(uri, mime)
+                    .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                try { app.startActivity(view) } catch (_: android.content.ActivityNotFoundException) {
+                    toast("No app on this phone opens .${ext(f.name)} files")
+                }
+            }
+        }
+    }
+
+    private fun toast(msg: String) = android.widget.Toast.makeText(app, msg, android.widget.Toast.LENGTH_SHORT).show()
 
     /** Convert and tag photo zips straight after unzipping them, with the details typed in the preview. */
     var convertAfterUnzip by mutableStateOf(true)
@@ -191,7 +254,7 @@ class AppModel(private val app: Application) {
         if (beforePlan == Phase.Ready) loadThumbnails()
     }
 
-    private fun closePlans() { plans.forEach { it.close() }; plans.clear() }
+    private fun closePlans() { peek = null; plans.forEach { it.close() }; plans.clear() }
 
 
     /** Problems that stop the plan, across all the zips. */

@@ -1,13 +1,19 @@
 package com.barion.filmscans.pc
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
@@ -16,6 +22,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -23,6 +30,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -41,13 +50,15 @@ fun PlanScreen(m: AppModel, pick: Pickers) {
     ScrollList(contentPadding = PaddingValues(16.dp), spacing = 8.dp) {
         item {
             Text("Nothing is written until you press Unzip. Rename any folder, clear a name to drop that level " +
-                "(what's in it moves up), or untick a folder to leave it out.", style = MaterialTheme.typography.bodySmall)
+                "(what's in it moves up), or untick a folder to leave it out. Click a file to open it.",
+                style = MaterialTheme.typography.bodySmall)
+            if (m.status.isNotEmpty()) Text(m.status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
         }
         for (p in m.plans) {
             val key = p.zip.absolutePath
             item(key = "head:$key") { PlanHeader(p, pick) }
             items(p.contents.folders, key = { "f:$key/${it.path}" }) { f -> FolderRow(m, p, f) }
-            item(key = "foot:$key") { PlanFooter(p) }
+            item(key = "foot:$key") { PlanFooter(m, p) }
         }
         if (problems.isNotEmpty()) item {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -117,7 +128,7 @@ private fun FolderRow(m: AppModel, p: ZipPlan, f: PlanFolder) {
                 if (f.sealed) add("a compressed zip unpacks here")
             }.joinToString(" · ")
             Text(if (left) "Left out" else info, style = MaterialTheme.typography.bodySmall)
-            if (!left && f.files > 0) p.contents.listing.let { l -> FilePeek(remember(l, f.path) { l.files.filter { it.folder == f.path } }) }
+            if (!left && f.files > 0) p.contents.listing.let { l -> FilePeek(m, p, remember(l, f.path) { l.files.filter { it.folder == f.path } }) }
             if (!left) p.contents.dateSummary[f.path]?.let { (sources, undated) ->
                 if (sources.isNotEmpty()) Text("Scan dates from: " + sources.entries.sortedByDescending { it.value }
                     .joinToString { "${plainSource(it.key)} (${it.value})" }, style = MaterialTheme.typography.bodySmall)
@@ -138,14 +149,14 @@ private fun FolderRow(m: AppModel, p: ZipPlan, f: PlanFolder) {
 }
 
 @Composable
-private fun PlanFooter(p: ZipPlan) {
+private fun PlanFooter(m: AppModel, p: ZipPlan) {
     val res by remember(p) { derivedStateOf { p.build() } }
     val looseFiles = p.contents.listing.files.count { it.folder.isEmpty() }
     Column(Modifier.padding(start = 12.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         if (looseFiles > 0) {
             Text("$looseFiles file(s) at the top of the zip go straight into the folder to make:",
                 style = MaterialTheme.typography.bodySmall)
-            p.contents.listing.let { l -> FilePeek(remember(l) { l.files.filter { it.folder.isEmpty() } }) }
+            p.contents.listing.let { l -> FilePeek(m, p, remember(l) { l.files.filter { it.folder.isEmpty() } }) }
         }
         val example = res.targets.firstOrNull { isImage(it.name) } ?: res.targets.firstOrNull()
         if (example != null) Text("e.g. ${java.io.File(p.dest, example.path).path}", style = MaterialTheme.typography.bodySmall,
@@ -176,17 +187,28 @@ private fun PasswordField(p: ZipPlan) {
 }
 
 /**
- * The files in one folder of the zip, as LabUnzip shows them: the first few, then how many more,
- * with a way to see every one. Name, size and its date in the zip, read from the zip's directory.
+ * The files in one folder of the zip: the first few, then how many more, with a way to see every one.
+ * Each shows a thumbnail when it's a photo, its size and its date in the zip, and opens in its usual
+ * app when clicked. Only that file is pulled out of the zip to do it.
  */
 @Composable
-private fun FilePeek(files: List<ArchiveFile>) {
+private fun FilePeek(m: AppModel, p: ZipPlan, files: List<ArchiveFile>) {
     var all by remember { mutableStateOf(false) }
     val shown = if (all) files else files.take(6)
-    Column(Modifier.padding(top = 2.dp, bottom = 2.dp)) {
-        for (f in shown) Row(Modifier.fillMaxWidth()) {
-            Text((if (f.item.encrypted) "🔒 " else "") + f.name, style = MaterialTheme.typography.bodySmall,
-                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+    Column(Modifier.padding(top = 2.dp, bottom = 2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        for (f in shown) Row(
+            Modifier.fillMaxWidth().clickable(onClickLabel = "Open ${f.name}") { m.openInZip(p, f) }.padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            LaunchedEffect(f.path, p.password) { m.thumb(p, f) }
+            Box(Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center) {
+                val t = p.thumbs[f.path]
+                if (t != null) Image(t, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.matchParentSize())
+                else Text(if (f.item.encrypted) "🔒" else ext(f.name).take(4).uppercase(), style = MaterialTheme.typography.labelSmall)
+            }
+            Text(f.name, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).padding(start = 8.dp))
             Text(" " + fileSize(f.size) + (f.item.time?.let { " · " + MINUTE.format(it) } ?: ""),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }

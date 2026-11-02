@@ -104,6 +104,35 @@ class ZipFormatsTest {
         assertTrue(out.contentEquals(data))
     }
 
+    @Test fun peekAtOneFileWithoutUnzippingTheRest() {
+        val tif = javaClass.getResourceAsStream("/tiff/rgb_u8_strips.tif")!!.readBytes()
+        val out = java.io.ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(out).use { z ->
+            z.putNextEntry(java.util.zip.ZipEntry("Roll 1/deflated.tif")); z.write(tif); z.closeEntry()
+            val stored = java.util.zip.ZipEntry("Roll 1/stored.tif").apply {
+                method = java.util.zip.ZipEntry.STORED; size = tif.size.toLong(); compressedSize = size; crc = crc(tif)
+            }
+            z.putNextEntry(stored); z.write(tif); z.closeEntry()
+            z.putNextEntry(java.util.zip.ZipEntry("notes.txt")); z.write("hello".toByteArray()); z.closeEntry()
+        }
+        val listing = Archive.list(ArchiveTest.Mem(out.toByteArray()))
+        for (name in listOf("deflated.tif", "stored.tif")) {
+            val f = listing.files.single { it.name == name }
+            val th = ZipPeek.tiffThumb(f, null, 64)!!
+            assertTrue(name, th.width in 1..64 && th.height in 1..64)
+        }
+        val dir = java.nio.file.Files.createTempDirectory("peek").toFile()
+        val pulled = ZipPeek.extract(listing.files.single { it.name == "deflated.tif" }, null, dir)
+        assertTrue(pulled.readBytes().contentEquals(tif))
+        assertEquals("hello", ZipPeek.extract(listing.files.single { it.name == "notes.txt" }, null, dir).readText())
+        // Only what was asked for is written.
+        assertEquals(setOf("deflated.tif", "notes.txt"), dir.list()!!.toSet())
+        // Locked files need the password even for a peek.
+        val locked = Archive.list(ArchiveTest.Mem(fixture("aes256.zip"))).files.first { it.name == "readme.txt" }
+        try { ZipPeek.extract(locked, null, dir); fail() } catch (_: PasswordNeeded) {}
+        assertEquals("hello\n", ZipPeek.extract(locked, pw, dir).readText())
+    }
+
     @Test fun unknownCompressionIsNamed() {
         val item = ZipItem("a.txt", 14, 0, 0, 1, 1, 0, null, false)
         assertEquals("it uses a compression type this app can't read (LZMA)", item.unreadable)

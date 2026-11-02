@@ -93,6 +93,9 @@ class ZipPlan(
     val needsPassword get() = listing?.needsPassword == true
     var password by mutableStateOf("")
     var passwordWrong by mutableStateOf(false)
+    /** Thumbnails of the photos in it, by path in the zip, made as they come on screen. */
+    val thumbs = mutableStateMapOf<String, androidx.compose.ui.graphics.ImageBitmap>()
+    val thumbsTried = java.util.Collections.synchronizedSet(HashSet<String>())
     /** Per folder: where the scan dates come from (label to count), and how many images have none. */
     val dateSummary = HashMap<String, Pair<Map<String, Int>, Int>>()
 
