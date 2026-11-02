@@ -27,9 +27,9 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun StartScreen(m: AppModel, pick: () -> Unit, unzip: () -> Unit) {
     Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        // The crooked horizon mark; the launcher icon is the film strip.
+        // The same mark as the launcher icon: a film canister with its leader out.
         Image(painterResource(R.drawable.start_mark), contentDescription = "Et Tu, Tiff?",
-            modifier = Modifier.width(200.dp).align(Alignment.CenterHorizontally))
+            modifier = Modifier.width(140.dp).align(Alignment.CenterHorizontally))
         Text("Turns folders of TIFF scans into full-quality JPEGs, one roll per folder, and tags the lab's own " +
             "JPEGs with the same details without re-saving them.",
             style = MaterialTheme.typography.bodyLarge)
