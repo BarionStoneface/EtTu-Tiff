@@ -12,6 +12,7 @@ const { planFrom, buildOutputPlan } = require('../src/plan');
 const { runPlan } = require('../src/extract');
 const { writeZip, jpegWithDate } = require('./makezip');
 const { fixDates } = require('../src/fixdates');
+const { Peeker } = require('../src/peek');
 
 let passed = 0;
 const failures = [];
@@ -336,6 +337,29 @@ function test(name, fn) {
     assert.strictEqual(Math.round(fs.statSync(a).mtimeMs / 1000), Math.round(new Date(2026, 2, 14, 9, 30, 0).getTime() / 1000));
     assert.strictEqual(Math.round(fs.statSync(b).mtimeMs / 1000), Math.round(new Date(2025, 11, 1, 18, 5, 10).getTime() / 1000));
     assert.strictEqual(fs.statSync(c).mtimeMs, before);
+  });
+
+  await test('one file can be looked at without unpacking the rest, zips inside included', async () => {
+    const peeker = await Peeker.open(outer);
+    try {
+      const all = [];
+      const collect = (node) => { all.push(...node.files); node.folders.forEach(collect); };
+      collect(scan.root);
+      assert.strictEqual(all.length, 6);
+      // Every file the scan lists can be found by the origin and path it records.
+      for (const f of all) {
+        const data = await peeker.read(f.origin, f.entryPath, 1e9);
+        assert.strictEqual(data.length, f.size, f.entryPath);
+      }
+      const notes = all.find((f) => f.originalName === 'notes.txt');
+      const dir = path.join(tmp, 'peek');
+      const pulled = await peeker.extract(notes.origin, notes.entryPath, dir);
+      assert.strictEqual(fs.readFileSync(pulled, 'utf8'), 'lab notes');
+      assert.deepStrictEqual(fs.readdirSync(dir), ['notes.txt'], 'only the one file is written');
+      assert.strictEqual(await peeker.read(notes.origin, notes.entryPath, 3), null, 'too big for a thumbnail');
+    } finally {
+      peeker.close();
+    }
   });
 
   await test('only files in the approved plan are written', async () => {

@@ -1,12 +1,14 @@
 'use strict';
 
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 
 const { scanArchive } = require('./src/zipscan');
 const { planFrom, buildOutputPlan } = require('./src/plan');
 const { runPlan } = require('./src/extract');
+const { Peeker } = require('./src/peek');
 
 let mainWindow = null;
 let pendingZipPath = null;
@@ -204,6 +206,50 @@ ipcMain.handle('run', async (event, { zipPath, scan, draft, destination }) => {
   } catch (err) {
     return { ok: false, error: err.message };
   }
+});
+
+// ---- looking at single files in the archive, before unpacking
+
+let peeker = null;
+let peekerOpening = null;
+
+/** The open archive, indexed once and kept open while it's on screen. */
+async function peekerFor(zipPath) {
+  if (peeker && peeker.zipPath === zipPath) return peeker;
+  if (peekerOpening && peekerOpening.zipPath === zipPath) return peekerOpening.promise;
+  if (peeker) { peeker.close(); peeker = null; }
+  const promise = Peeker.open(zipPath).then((p) => { peeker = p; peekerOpening = null; return p; });
+  peekerOpening = { zipPath, promise };
+  return promise;
+}
+
+// Thumbnails come from JPEGs and PNGs up to this size; Electron can't draw a TIFF.
+const THUMB_LIMIT = 40 * 1024 * 1024;
+
+ipcMain.handle('peek-thumb', async (_event, { zipPath, origin, entryPath }) => {
+  try {
+    if (!/\.(jpe?g|png)$/i.test(entryPath)) return null;
+    const data = await (await peekerFor(zipPath)).read(origin, entryPath, THUMB_LIMIT);
+    if (!data) return null;
+    const image = nativeImage.createFromBuffer(data);
+    return image.isEmpty() ? null : image.resize({ height: 96, quality: 'good' }).toDataURL();
+  } catch {
+    return null;
+  }
+});
+
+ipcMain.handle('peek-open', async (_event, { zipPath, origin, entryPath }) => {
+  try {
+    const target = await (await peekerFor(zipPath)).extract(origin, entryPath, path.join(os.tmpdir(), 'labunzip-peek'));
+    return await shell.openPath(target); // '' when it opened
+  } catch (err) {
+    return err.message;
+  }
+});
+
+app.on('will-quit', () => {
+  if (peeker) peeker.close();
+  try { fs.rmSync(path.join(os.tmpdir(), 'labunzip-peek'), { recursive: true, force: true }); } catch { /* best effort */ }
 });
 
 ipcMain.handle('reveal', async (_event, target) => {

@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('labunzip', {
   run: (payload) => ipcRenderer.invoke('run', payload),
   cancel: () => ipcRenderer.invoke('cancel'),
   reveal: (target) => ipcRenderer.invoke('reveal', target),
+  peekThumb: (where) => ipcRenderer.invoke('peek-thumb', where),
+  peekOpen: (where) => ipcRenderer.invoke('peek-open', where),
 
   // Dropped files no longer expose .path directly; this is the supported way
   // to get a real path out of a File in current Electron.

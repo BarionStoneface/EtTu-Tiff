@@ -9,6 +9,8 @@
 const api = window.labunzip;
 
 const state = {
+  /** Folders whose preview lists every file, not just the first six. */
+  showAll: new Set(),
   zipPath: null,
   scan: null,
   draft: null,
@@ -34,6 +36,32 @@ function formatDate(iso) {
   if (!iso) return 'no date';
   const d = new Date(iso);
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+/** Thumbnails already made, by archive and file, so redrawing the plan doesn't make them again. */
+const thumbCache = new Map();
+
+/** A small picture of a photo still in the archive, or its file type for anything else. */
+function thumbFor(where, name) {
+  const box = text('span', 'thumb');
+  const key = `${where.zipPath}\u0000${where.origin}\u0000${where.entryPath}`;
+  const label = () => { box.textContent = (name.split('.').pop() || '').slice(0, 4).toUpperCase(); };
+  const showImage = (url) => {
+    if (!url) return label();
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = '';
+    box.replaceChildren(img);
+  };
+  if (thumbCache.has(key)) {
+    Promise.resolve(thumbCache.get(key)).then(showImage);
+  } else {
+    label();
+    const pending = api.peekThumb(where);
+    thumbCache.set(key, pending);
+    pending.then((url) => { thumbCache.set(key, url); showImage(url); });
+  }
+  return box;
 }
 
 function text(tag, className, content) {
@@ -272,21 +300,37 @@ function paintPlan() {
     const folder = state.scan ? findNode(state.scan.root, folderPath) : null;
     if (!folder) continue;
 
-    const entryPaths = new Set(folder.files.map((f) => f.entryPath));
-    const rows = plan.files.filter((f) => entryPaths.has(f.sourcePath));
+    const byEntry = new Map(folder.files.map((f) => [f.entryPath, f]));
+    const rows = plan.files.filter((f) => byEntry.has(f.sourcePath));
     const clashing = new Set(plan.conflicts.map((c) => c.targetPath.toLowerCase()));
+    const all = state.showAll.has(folderPath);
 
     previewEl.replaceChildren();
-    for (const row of rows.slice(0, 6)) {
-      const line = text('div');
+    for (const row of all ? rows : rows.slice(0, 6)) {
+      // Click to open just this file in its usual app; nothing else is unpacked.
+      const source = byEntry.get(row.sourcePath);
+      const where = { zipPath: state.zipPath, origin: source.origin, entryPath: source.entryPath };
+      const line = text('div', 'peekline');
+      line.title = `Open ${row.originalName}`;
+      line.appendChild(thumbFor(where, row.originalName));
       line.appendChild(text('span', 'was', row.originalName));
       line.appendChild(text('span', 'arrow', '\u2192'));
       const isClash = clashing.has(row.targetPath.toLowerCase());
       line.appendChild(text('span', isClash ? 'clash' : 'now', row.outputName));
+      line.addEventListener('click', async () => {
+        $('planStatus').textContent = `Opening ${row.originalName}…`;
+        const error = await api.peekOpen(where);
+        $('planStatus').textContent = error ? `Couldn't open ${row.originalName}: ${error}` : '';
+      });
       previewEl.appendChild(line);
     }
     if (rows.length > 6) {
-      previewEl.appendChild(text('div', 'more', `and ${rows.length - 6} more, the same way`));
+      const more = text('button', 'morebtn', all ? 'Show fewer' : `and ${rows.length - 6} more, the same way: show all`);
+      more.addEventListener('click', () => {
+        if (all) state.showAll.delete(folderPath); else state.showAll.add(folderPath);
+        paintPlan();
+      });
+      previewEl.appendChild(more);
     }
     if (rows.length) {
       previewEl.appendChild(text('div', 'more', `First file dated ${formatDate(rows[0].date)}`));

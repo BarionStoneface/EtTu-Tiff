@@ -209,6 +209,18 @@ body { display: flex; flex-direction: column; }
 .preview .now { color: var(--good); }
 .preview .clash { color: var(--bad); }
 .preview .more { color: var(--muted); font-style: italic; margin-top: 4px; }
+.preview .peekline { display: flex; align-items: center; gap: 0; cursor: pointer; border-radius: 4px; padding: 2px 0; }
+.preview .peekline:hover { background: var(--line); }
+.preview .thumb {
+  flex: none; width: 48px; height: 36px; margin-right: 8px; border-radius: 3px; overflow: hidden;
+  background: var(--line); color: var(--muted); font-size: 0.65rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.preview .thumb img { width: 100%; height: 100%; object-fit: cover; }
+.preview .morebtn {
+  margin-top: 6px; background: none; border: none; color: var(--accent, var(--good)); cursor: pointer;
+  font: inherit; font-style: italic; padding: 0;
+}
 
 .datenote { font-size: 0.78rem; color: var(--muted); margin-top: 8px; }
 

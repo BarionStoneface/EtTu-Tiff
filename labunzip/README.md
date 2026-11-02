@@ -17,6 +17,11 @@ Unpack. One step instead of three.
 - **Shows the plan first.** The whole folder and file tree it is about to
   create, with the names already applied. Nothing is written to the destination
   until you press Unpack.
+- **Look inside before unpacking.** Each file in the plan has a thumbnail if
+  it's a JPEG or PNG, and clicking any file opens it in its usual app. Only that
+  one file is pulled out, into a temporary folder, even from a zip inside the
+  zip. TIFFs open the same way but have no thumbnail, because Electron can't
+  draw them.
 - **Per-roll naming.** Each subfolder is its own roll, so each gets its own
   folder name, its own text to add around the filenames, and its own metadata.
 - **Keeps the lab's numbers.** Text is only ever added around the scanner's
